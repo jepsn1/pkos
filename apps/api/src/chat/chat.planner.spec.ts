@@ -169,6 +169,7 @@ describe('ChatService planner (fitness tools)', () => {
       'query_fitness',
     ]);
     expect(llm.calls[0].messages[0].content).toContain('log_workout');
+    expect(llm.calls[0].messages[0].content).toContain("Today's date is 2026-07-13");
 
     // the tool actually ran
     expect(fitnessRepo.workouts).toHaveLength(1);

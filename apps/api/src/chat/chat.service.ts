@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
-import { FITNESS_ROUTING, FitnessToolsService } from '../fitness/fitness-tools.service';
+import { FitnessToolsService } from '../fitness/fitness-tools.service';
 import { EMBEDDING_PROVIDER, type EmbeddingProvider } from '../knowledge/embedding.provider';
 import { KNOWLEDGE_REPO, type KnowledgeRepo, type SearchHit } from '../knowledge/knowledge.repo';
 import { VaultService } from '../knowledge/vault.service';
@@ -138,7 +138,7 @@ export class ChatService {
 
   /** Retrieval hits rendered with their vault bodies so the model can ground on them. */
   private async systemPrompt(hits: SearchHit[]): Promise<string> {
-    const routing = this.fitness ? `\n\n${FITNESS_ROUTING}` : '';
+    const routing = this.fitness ? `\n\n${this.fitness.routingPrompt()}` : '';
     if (hits.length === 0) return `${SYSTEM_NO_HITS}${routing}`;
     const items = await Promise.all(
       hits.map(async (h, i) => {

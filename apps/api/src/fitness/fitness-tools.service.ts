@@ -9,10 +9,11 @@ import {
 /** Injectable clock (tests pin it); defaults to the real one. */
 export const FITNESS_NOW = 'FITNESS_NOW';
 
-/** Appended to the chat system prompt so the planner routes fitness turns to tools. */
+/** Appended to the chat system prompt so the planner routes fitness turns to tools.
+ *  Prefer FitnessToolsService.routingPrompt(), which prepends today's date. */
 export const FITNESS_ROUTING = `You also have fitness tools for the user's personal training log.
 Routing rules:
-- When the user reports a workout, exercises, sets or reps (e.g. "bench 5x5 at 80kg"), call log_workout.
+- When the user reports a workout, exercises, sets or reps, call log_workout. "AxB" means A separate sets of B reps each ("bench 5x5 at 80kg" = five set entries, each {reps: 5, weight_kg: 80}).
 - When the user reports body weight, calories eaten, or protein eaten, call log_body_metric.
 - When the user asks about their training or nutrition data (averages, progression, weekly volume, recent workouts), call query_fitness and answer strictly from the tool result.
 - For every other question — notes, knowledge, theology, general topics — do NOT call fitness tools; answer from the knowledge items above as instructed.
@@ -50,6 +51,8 @@ export const FITNESS_TOOLS: LlmTool[] = [
               exercise: { type: 'string', description: 'Exercise name, e.g. "bench press".' },
               sets: {
                 type: 'array',
+                description:
+                  'One entry per set performed: "5x5 at 80kg" = five entries of {reps: 5, weight_kg: 80}.',
                 items: {
                   type: 'object',
                   required: ['reps'],
@@ -114,6 +117,11 @@ type Args = Record<string, unknown>;
 @Injectable()
 export class FitnessToolsService {
   readonly tools = FITNESS_TOOLS;
+
+  /** Routing rules + today's date (so "today"/"this week" resolve correctly). */
+  routingPrompt(): string {
+    return `Today's date is ${this.today()}.\n${FITNESS_ROUTING}`;
+  }
 
   constructor(
     @Inject(FITNESS_REPO) private readonly repo: FitnessRepo,
