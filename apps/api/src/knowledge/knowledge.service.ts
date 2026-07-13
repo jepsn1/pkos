@@ -1,0 +1,92 @@
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { EMBEDDING_PROVIDER, type EmbeddingProvider } from './embedding.provider';
+import {
+  KNOWLEDGE_REPO,
+  type KnowledgeItem,
+  type KnowledgeRepo,
+  type SearchHit,
+} from './knowledge.repo';
+import { embeddingText, type Note } from './note';
+import { VaultService } from './vault.service';
+
+export interface IngestRequest {
+  title: string;
+  markdown: string;
+  source?: string;
+  tags?: string[];
+  summary?: string;
+  importance?: number;
+  /** Vault folder, e.g. faith/reflections. */
+  folder?: string;
+}
+
+const DEFAULT_FOLDER = 'articles';
+const DEFAULT_SEARCH_LIMIT = 10;
+
+@Injectable()
+export class KnowledgeService {
+  constructor(
+    private readonly vault: VaultService,
+    @Inject(KNOWLEDGE_REPO) private readonly repo: KnowledgeRepo,
+    @Inject(EMBEDDING_PROVIDER) private readonly embedder: EmbeddingProvider,
+  ) {}
+
+  /** Vault write + commit first (canonical), then derived row + embedding. */
+  async ingest(req: IngestRequest): Promise<KnowledgeItem> {
+    const note: Note = {
+      meta: {
+        title: req.title,
+        source: req.source,
+        tags: req.tags ?? [],
+        summary: req.summary,
+        importance: req.importance,
+        created: new Date().toISOString().slice(0, 10),
+      },
+      body: req.markdown,
+    };
+    const relPath = await this.vault.writeNote(req.folder ?? DEFAULT_FOLDER, note);
+    return this.index(relPath, note);
+  }
+
+  async list(): Promise<KnowledgeItem[]> {
+    return this.repo.list();
+  }
+
+  /** Metadata row + canonical body read from the vault. */
+  async get(id: string): Promise<KnowledgeItem & { body: string }> {
+    const item = await this.repo.getById(id);
+    if (!item) throw new NotFoundException(`no knowledge item ${id}`);
+    const note = await this.vault.readNote(item.path);
+    if (!note) throw new NotFoundException(`vault file missing: ${item.path}`);
+    return { ...item, body: note.body };
+  }
+
+  async search(query: string, limit = DEFAULT_SEARCH_LIMIT): Promise<SearchHit[]> {
+    const embedding = await this.embedder.embed(query);
+    return this.repo.search(embedding, limit);
+  }
+
+  /** Wipe derived rows and re-derive everything from the vault. */
+  async rebuild(): Promise<{ indexed: number }> {
+    await this.repo.wipe();
+    const notes = await this.vault.listNotes();
+    for (const { path, note } of notes) {
+      await this.index(path, note);
+    }
+    return { indexed: notes.length };
+  }
+
+  private async index(relPath: string, note: Note): Promise<KnowledgeItem> {
+    const embedding = await this.embedder.embed(embeddingText(note));
+    return this.repo.upsert({
+      path: relPath,
+      title: note.meta.title,
+      source: note.meta.source ?? null,
+      tags: note.meta.tags,
+      summary: note.meta.summary ?? null,
+      importance: note.meta.importance ?? null,
+      created: note.meta.created,
+      embedding,
+    });
+  }
+}

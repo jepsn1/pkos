@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "rebuild-index": "nest build && node dist/scripts/rebuild-index.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
@@ -19,6 +20,7 @@
     "@pkos/shared": "workspace:*",
     "dotenv": "^17.2.4",
     "drizzle-orm": "^0.45.2",
+    "gray-matter": "^4.0.3",
     "pg": "^8.17.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
