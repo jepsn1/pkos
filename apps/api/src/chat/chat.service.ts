@@ -1,4 +1,5 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { FITNESS_ROUTING, FitnessToolsService } from '../fitness/fitness-tools.service';
 import { EMBEDDING_PROVIDER, type EmbeddingProvider } from '../knowledge/embedding.provider';
 import { KNOWLEDGE_REPO, type KnowledgeRepo, type SearchHit } from '../knowledge/knowledge.repo';
 import { VaultService } from '../knowledge/vault.service';
@@ -24,6 +25,8 @@ export interface ChatResult {
 }
 
 const TOP_K = 5;
+/** Cap on tool rounds per turn so a looping model can't spin forever. */
+const MAX_TOOL_ROUNDS = 4;
 /** Cosine cutoff below which retrieval counts as "nothing relevant" (nomic-embed:
  *  on-topic queries score ~0.6–0.75 here, nonsense tops out ~0.44). */
 const DEFAULT_MIN_SCORE = 0.5;
@@ -49,6 +52,7 @@ export class ChatService {
     @Inject(EMBEDDING_PROVIDER) private readonly embedder: EmbeddingProvider,
     @Inject(LLM_PROVIDER) private readonly llm: LlmProvider,
     private readonly vault: VaultService,
+    @Optional() private readonly fitness?: FitnessToolsService,
   ) {}
 
   async chat(message: string, conversationId?: string): Promise<ChatResult> {
@@ -79,7 +83,30 @@ export class ChatService {
       ...history.map(({ role, content }): LlmMessage => ({ role, content })),
       { role: 'user', content: message },
     ];
-    const answer = stripThink(toReply(await this.llm.chat(llmMessages)).content);
+    // Planner: fitness tools are offered on every turn; the system prompt routes
+    // fitness statements/questions to them, everything else stays on retrieval.
+    const tools = this.fitness?.tools;
+    let reply = toReply(await this.llm.chat(llmMessages, tools));
+    for (
+      let round = 0;
+      this.fitness && reply.toolCalls.length > 0 && round < MAX_TOOL_ROUNDS;
+      round++
+    ) {
+      llmMessages.push({
+        role: 'assistant',
+        content: reply.content,
+        toolCalls: reply.toolCalls,
+      });
+      for (const call of reply.toolCalls) {
+        llmMessages.push({
+          role: 'tool',
+          content: await this.fitness.execute(call),
+          toolName: call.name,
+        });
+      }
+      reply = toReply(await this.llm.chat(llmMessages, tools));
+    }
+    const answer = stripThink(reply.content);
 
     await this.repo.addMessage({
       conversationId: conversation.id,
@@ -111,7 +138,8 @@ export class ChatService {
 
   /** Retrieval hits rendered with their vault bodies so the model can ground on them. */
   private async systemPrompt(hits: SearchHit[]): Promise<string> {
-    if (hits.length === 0) return SYSTEM_NO_HITS;
+    const routing = this.fitness ? `\n\n${FITNESS_ROUTING}` : '';
+    if (hits.length === 0) return `${SYSTEM_NO_HITS}${routing}`;
     const items = await Promise.all(
       hits.map(async (h, i) => {
         const note = await this.vault.readNote(h.path);
@@ -119,7 +147,7 @@ export class ChatService {
         return `[${i + 1}] path: ${h.path}\ntitle: ${h.title}\n${body}`;
       }),
     );
-    return `${SYSTEM_BASE}\n\nKnowledge items:\n\n${items.join('\n\n---\n\n')}`;
+    return `${SYSTEM_BASE}${routing}\n\nKnowledge items:\n\n${items.join('\n\n---\n\n')}`;
   }
 }
 
