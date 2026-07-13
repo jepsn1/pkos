@@ -121,7 +121,7 @@ export class OpenAiCompatService {
 export function withSources(answer: string, citations: Citation[]): string {
   if (citations.length === 0) return answer;
   const lines = citations.map(
-    (c) => `- \`${c.path}\` — ${c.title} (${c.score.toFixed(2)})`,
+    (c) => `- \`${c.path}\` — ${c.title} (${c.score !== undefined ? c.score.toFixed(2) : `via graph: ${c.relation}`})`,
   );
   return `${answer}\n\n---\n**Sources:**\n${lines.join('\n')}`;
 }
