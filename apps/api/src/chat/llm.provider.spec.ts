@@ -42,6 +42,56 @@ describe('OllamaLlmProvider', () => {
     expect(JSON.parse(calls[0].init.body as string).model).toBe('qwen3:8b');
   });
 
+  it('with tools: sends ollama-native tools + tool messages, returns LlmReply with tool_calls', async () => {
+    const { fn, calls } = fakeFetch(200, {
+      message: {
+        content: '',
+        tool_calls: [{ function: { name: 'log_workout', arguments: { notes: 'x' } } }],
+      },
+    });
+    const provider = new OllamaLlmProvider(fn);
+    const tools = [
+      { name: 'log_workout', description: 'log it', parameters: { type: 'object' } },
+    ];
+
+    const reply = await provider.chat(
+      [
+        { role: 'user', content: 'bench 5x5' },
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ name: 'log_workout', arguments: { notes: 'x' } }],
+        },
+        { role: 'tool', content: '{"ok":true}', toolName: 'log_workout' },
+      ],
+      tools,
+    );
+
+    expect(reply).toEqual({
+      content: '',
+      toolCalls: [{ name: 'log_workout', arguments: { notes: 'x' } }],
+    });
+    const payload = JSON.parse(calls[0].init.body as string);
+    expect(payload.tools).toEqual([{ type: 'function', function: tools[0] }]);
+    expect(payload.messages[1].tool_calls).toEqual([
+      { function: { name: 'log_workout', arguments: { notes: 'x' } } },
+    ]);
+    expect(payload.messages[2]).toEqual({
+      role: 'tool',
+      content: '{"ok":true}',
+      tool_name: 'log_workout',
+    });
+  });
+
+  it('with tools but no tool_calls: LlmReply with empty toolCalls, no throw on content', async () => {
+    const { fn } = fakeFetch(200, { message: { content: 'plain answer' } });
+    const reply = await new OllamaLlmProvider(fn).chat(
+      [{ role: 'user', content: 'q' }],
+      [{ name: 't', description: 'd', parameters: {} }],
+    );
+    expect(reply).toEqual({ content: 'plain answer', toolCalls: [] });
+  });
+
   it('throws on HTTP errors and on empty content', async () => {
     await expect(
       new OllamaLlmProvider(fakeFetch(500, {}).fn).chat([{ role: 'user', content: 'q' }]),

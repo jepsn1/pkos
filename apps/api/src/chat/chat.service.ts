@@ -9,7 +9,13 @@ import {
   type Conversation,
   type Message,
 } from './chat.repo';
-import { LLM_PROVIDER, stripThink, type LlmMessage, type LlmProvider } from './llm.provider';
+import {
+  LLM_PROVIDER,
+  stripThink,
+  toReply,
+  type LlmMessage,
+  type LlmProvider,
+} from './llm.provider';
 
 export interface ChatResult {
   conversationId: string;
@@ -73,7 +79,7 @@ export class ChatService {
       ...history.map(({ role, content }): LlmMessage => ({ role, content })),
       { role: 'user', content: message },
     ];
-    const answer = stripThink(await this.llm.chat(llmMessages));
+    const answer = stripThink(toReply(await this.llm.chat(llmMessages)).content);
 
     await this.repo.addMessage({
       conversationId: conversation.id,
