@@ -34,6 +34,17 @@ pnpm 11 monorepo (mirrors biblestdy): `apps/api` (NestJS + Drizzle + Vitest, pre
 - Endpoints (prefix `/api`):
   - `POST /chat` `{message, conversationId?}` → `{conversationId, answer, citations: [{path, title, score}]}`. No conversationId → new conversation (title = first message, truncated 80 chars); continuation replays prior messages to the LLM.
   - `GET /conversations` — list, most recently updated first; `GET /conversations/:id` — conversation + messages.
+- Graph-augmented retrieval (slice 9): after the vector top-k, 1-hop graph neighbors of the hits join the grounded context labeled with their relationship (`related_to: <title> (<path>)`, incoming edges as `<type> (incoming)`); neighbors that are already hits get the label but no repeated body. Graph-sourced citations: `{path, title, via: 'graph', relation}` (no score).
+
+## Graph (slice 9, issue #10)
+
+- Typed edges between knowledge items; types: `related_to, references, supports, contradicts, parent, child, mentioned_in, written_by` (pg enum).
+- Vault stays canonical: an edge lives as `relationships: [{type, path}]` in the **from-item's** frontmatter; every create/delete rewrites that file + vault commit (`link a -[type]-> b` / `unlink ...`). Db table `relationships` (from_item, to_item, type; unique triple; FK cascade) is derived: `rebuild-index` second pass restores rows from frontmatter (paths → ids, unresolvable edges warned + skipped).
+- Traversal: undirected n-hop walk via recursive CTE (`DrizzleRelationshipRepo.neighborhood`), depth-bounded + cycle-safe; edges in the response stay typed + directional.
+- Endpoints (prefix `/api`):
+  - `POST /relationships` `{fromPath|fromId, toPath|toId, type}` → edge row + `fromPath`/`toPath`; 409 on duplicate triple, 400 bad type/self-link, 404 unknown item.
+  - `DELETE /relationships/:id` → removes frontmatter entry + row.
+  - `GET /knowledge/:id/graph?depth=` — n-hop neighborhood `{root, depth, nodes: [{id, path, title, summary, depth}], edges: [{id, fromId, fromPath, toId, toPath, type}]}`; depth default 1, capped at 3.
 
 ## Prod (docker)
 
