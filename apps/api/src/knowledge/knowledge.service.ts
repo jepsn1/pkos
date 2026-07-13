@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { EMBEDDING_PROVIDER, type EmbeddingProvider } from './embedding.provider';
 import {
   KNOWLEDGE_REPO,
@@ -8,6 +8,16 @@ import {
 } from './knowledge.repo';
 import { embeddingText, type Note } from './note';
 import { VaultService } from './vault.service';
+import {
+  TRANSCRIPT_SEARCH,
+  type SermonSearchHit,
+  type TranscriptSearch,
+} from '../sermons/sermons.repo';
+
+/** /api/search result: knowledge item or sermon transcript chunk. */
+export type UnifiedSearchHit =
+  | (SearchHit & { type: 'knowledge' })
+  | (SermonSearchHit & { type: 'sermon' });
 
 export interface IngestRequest {
   title: string;
@@ -29,6 +39,10 @@ export class KnowledgeService {
     private readonly vault: VaultService,
     @Inject(KNOWLEDGE_REPO) private readonly repo: KnowledgeRepo,
     @Inject(EMBEDDING_PROVIDER) private readonly embedder: EmbeddingProvider,
+    // Optional so knowledge tests need no sermon fake; absent -> knowledge-only.
+    @Optional()
+    @Inject(TRANSCRIPT_SEARCH)
+    private readonly transcripts?: TranscriptSearch,
   ) {}
 
   /** Vault write + commit first (canonical), then derived row + embedding. */
@@ -61,9 +75,19 @@ export class KnowledgeService {
     return { ...item, body: note.body };
   }
 
-  async search(query: string, limit = DEFAULT_SEARCH_LIMIT): Promise<SearchHit[]> {
+  /** Union of knowledge items and sermon transcript chunks, cosine-ranked. */
+  async search(query: string, limit = DEFAULT_SEARCH_LIMIT): Promise<UnifiedSearchHit[]> {
     const embedding = await this.embedder.embed(query);
-    return this.repo.search(embedding, limit);
+    const [items, chunks] = await Promise.all([
+      this.repo.search(embedding, limit),
+      this.transcripts?.search(embedding, limit) ?? Promise.resolve([]),
+    ]);
+    return [
+      ...items.map((h) => ({ ...h, type: 'knowledge' as const })),
+      ...chunks.map((h) => ({ ...h, type: 'sermon' as const })),
+    ]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
   }
 
   /** Wipe derived rows and re-derive everything from the vault. */

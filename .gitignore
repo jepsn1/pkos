@@ -5,3 +5,6 @@ dist/
 !.env.example
 coverage/
 .claude/worktrees/
+.uploads/
+.venv/
+__pycache__/
