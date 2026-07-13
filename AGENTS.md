@@ -26,6 +26,15 @@ pnpm 11 monorepo (mirrors biblestdy): `apps/api` (NestJS + Drizzle + Vitest, pre
   - `GET /search?q=&limit=` — cosine-ranked hits `{id, path, title, summary, score}` (limit ≤50, default 10).
 - Prod vault access: compose mounts `/srv/data/knowledge` rw at `/vault`, container runs as `user: 1000:1000` (host uid) so commits stay host-owned and host-side git keeps working; git identity/safe.directory passed per-command with `-c` flags (no config in image), `HOME=/tmp` for git. Vault pushes to GitHub stay manual/host-side.
 
+## Chat (slice 4, issue #5)
+
+- `LlmProvider` iface (fake in tests) + Ollama impl: ollama `POST /api/chat`, `LLM_MODEL` env (default `qwen3:14b`), `think:false`, 120s timeout, `<think>` stripped anyway.
+- Conversations = PRIMARY data in postgres (`conversations` + `messages`, citations jsonb) — not vault-derived, not rebuildable.
+- Flow: embed query → top-5 cosine search → drop hits below `RETRIEVAL_MIN_SCORE` (default 0.5; on-topic ≈0.6–0.75, nonsense ≤0.44) → system prompt w/ item paths + bodies (read from vault), answer-ONLY-from-items + cite-paths instructions; zero hits → honest "nothing relevant" instruction, empty citations.
+- Endpoints (prefix `/api`):
+  - `POST /chat` `{message, conversationId?}` → `{conversationId, answer, citations: [{path, title, score}]}`. No conversationId → new conversation (title = first message, truncated 80 chars); continuation replays prior messages to the LLM.
+  - `GET /conversations` — list, most recently updated first; `GET /conversations/:id` — conversation + messages.
+
 ## Prod (docker)
 
 - Deploy: `make deploy` in `/srv/apps/pkos` (git pull, pnpm install, `docker compose up -d --build`).

@@ -7,7 +7,8 @@ Self-hosted, AI-native personal knowledge system. One assistant, private data, d
 - Contained app at `/srv/apps/pkos` per jepsn1/infra conventions — own compose, joins external `web` network, own `pkos` database in shared `infra-postgres` (pgvector).
 - Canonical knowledge = markdown in the separate `jepsn1/knowledge` vault repo (data outlives software). Postgres holds only derived data: metadata, embeddings, graph — rebuildable from the vault via `pnpm --filter @pkos/api rebuild-index`.
 - Knowledge API: `POST /api/knowledge` (ingest → vault file + commit + embedded db row), `GET /api/knowledge[/:id]`, `GET /api/search?q=` (pgvector cosine ranking, ollama `nomic-embed-text`). Details: `AGENTS.md`.
-- LLM: local Ollama (Qwen) on the RX 6900 XT via ROCm, behind a provider interface.
+- Chat API: `POST /api/chat` `{message, conversationId?}` — retrieval-grounded answer w/ citations `{path, title, score}`; honest "nothing relevant" when retrieval misses. Conversations persisted: `GET /api/conversations[/:id]`.
+- LLM: local Ollama (Qwen) on the RX 6900 XT via ROCm, behind a provider interface (`LlmProvider`, `LLM_MODEL` default `qwen3:14b`).
 - Exposure: Tailscale-only. No public domain.
 
 ## Layout (mirrors biblestdy)
