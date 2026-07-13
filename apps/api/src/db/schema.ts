@@ -1,8 +1,12 @@
+import { sql } from 'drizzle-orm';
 import {
+  boolean,
+  check,
   date,
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
   text,
   timestamp,
@@ -70,3 +74,55 @@ export const messages = pgTable(
   },
   (t) => [index('messages_conversation_id_idx').on(t.conversationId)],
 );
+
+// Fitness (slice 11) — PRIMARY data: workouts, body metrics, goals live only here.
+export const workouts = pgTable('workouts', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  date: date('date').notNull(),
+  notes: text('notes'),
+});
+
+export const workoutSets = pgTable(
+  'workout_sets',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    workoutId: uuid('workout_id')
+      .notNull()
+      .references(() => workouts.id, { onDelete: 'cascade' }),
+    /** Normalized lowercase, e.g. "bench press". */
+    exercise: text('exercise').notNull(),
+    /** 1-based position of the set within the exercise. */
+    setNo: integer('set_no').notNull(),
+    reps: integer('reps').notNull(),
+    /** Null for bodyweight sets. */
+    weightKg: numeric('weight_kg', { precision: 6, scale: 2 }),
+  },
+  (t) => [
+    index('workout_sets_workout_id_idx').on(t.workoutId),
+    index('workout_sets_exercise_idx').on(t.exercise),
+  ],
+);
+
+export const bodyMetrics = pgTable(
+  'body_metrics',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    date: date('date').notNull(),
+    weightKg: numeric('weight_kg', { precision: 5, scale: 2 }),
+    calories: integer('calories'),
+    proteinG: numeric('protein_g', { precision: 6, scale: 1 }),
+  },
+  (t) => [
+    check(
+      'body_metrics_at_least_one',
+      sql`${t.weightKg} IS NOT NULL OR ${t.calories} IS NOT NULL OR ${t.proteinG} IS NOT NULL`,
+    ),
+  ],
+);
+
+export const goals = pgTable('goals', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  text: text('text').notNull(),
+  done: boolean('done').notNull().default(false),
+  created: timestamp('created', { withTimezone: true }).notNull().defaultNow(),
+});
