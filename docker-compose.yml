@@ -7,6 +7,15 @@ services:
     container_name: pkos-api
     restart: unless-stopped
     env_file: .env            # prod env, repo root — never committed
+    # Run as host uid 1000 (marcus) so vault writes/commits stay host-owned and
+    # host-side git keeps working. HOME=/tmp gives git a writable home.
+    user: "1000:1000"
+    environment:
+      HOME: /tmp
+    volumes:
+      # Canonical knowledge vault (jepsn1/knowledge checkout), rw for ingest;
+      # VAULT_PATH=/vault in .env points the api at it.
+      - /srv/data/knowledge:/vault
     networks: [web]
     ports:
       # Tailscale-only exposure: bound to this host's tailscale IPv4 (TAILSCALE_IP

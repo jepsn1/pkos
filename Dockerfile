@@ -1,7 +1,8 @@
 # API container (mirrors biblestdy). Single stage; slim later if size bites.
 FROM node:22-alpine
 
-RUN corepack enable
+# git: api commits knowledge-vault writes (vault mounted at /vault, see compose)
+RUN apk add --no-cache git && corepack enable
 WORKDIR /app
 
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./

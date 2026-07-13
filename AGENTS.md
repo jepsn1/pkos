@@ -13,7 +13,18 @@ pnpm 11 monorepo (mirrors biblestdy): `apps/api` (NestJS + Drizzle + Vitest, pre
 - **Commit often**: checkpoint after every green iteration, never one big diff at sign-off.
 - Env: `apps/api/.env` = dev (localhost hosts), root `.env` = prod (compose env_file, container hosts). Both gitignored; `.env.example` files document them.
 - DB: `pkos` on shared infra-postgres (`127.0.0.1:5432` dev, `infra-postgres:5432` prod), **pgvector enabled**. Schema via Drizzle (`apps/api/src/db/schema.ts`), dev push: `pnpm --filter @pkos/api db:push`.
-- LLM: `pkos-ollama` container (ROCm, RX 6900 XT), `127.0.0.1:11434` dev / `pkos-ollama:11434` prod. Models: qwen3:14b, qwen3:8b.
+- LLM: `pkos-ollama` container (ROCm, RX 6900 XT), `127.0.0.1:11434` dev / `pkos-ollama:11434` prod. Models: qwen3:14b, qwen3:8b, nomic-embed-text (embeddings, 768-dim).
+
+## Knowledge (slice 3, issue #4)
+
+- Vault = canonical: markdown + YAML frontmatter (title, source, tags, summary, importance, created) in `/srv/data/knowledge` (checkout of jepsn1/knowledge). `VAULT_PATH` env overrides (default `/srv/data/knowledge`; `/vault` in prod container). Every api write commits in the vault repo.
+- DB = derived only: `knowledge_items` (path unique, metadata, 768-dim pgvector embedding, hnsw cosine index). Rebuildable any time: `pnpm --filter @pkos/api rebuild-index` — wipes table, re-derives rows + embeddings from vault files. Needs db + ollama up.
+- Embeddings: ollama `nomic-embed-text` via `POST /api/embed`, behind `EmbeddingProvider` (`EMBEDDING_MODEL` env overrides model). Embeds title+summary+body. Pull once: `docker exec pkos-ollama ollama pull nomic-embed-text`.
+- Endpoints (prefix `/api`):
+  - `POST /knowledge` `{title, markdown, source?, tags?, summary?, importance?, folder?}` → vault file (slugged, suffixed on collision) + vault commit + db row + embedding. Default folder `articles`.
+  - `GET /knowledge` — list rows; `GET /knowledge/:id` — row + body read from vault.
+  - `GET /search?q=&limit=` — cosine-ranked hits `{id, path, title, summary, score}` (limit ≤50, default 10).
+- Prod vault access: compose mounts `/srv/data/knowledge` rw at `/vault`, container runs as `user: 1000:1000` (host uid) so commits stay host-owned and host-side git keeps working; git identity/safe.directory passed per-command with `-c` flags (no config in image), `HOME=/tmp` for git. Vault pushes to GitHub stay manual/host-side.
 
 ## Prod (docker)
 
