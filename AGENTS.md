@@ -35,6 +35,14 @@ pnpm 11 monorepo (mirrors biblestdy): `apps/api` (NestJS + Drizzle + Vitest, pre
   - `POST /chat` `{message, conversationId?}` → `{conversationId, answer, citations: [{path, title, score}]}`. No conversationId → new conversation (title = first message, truncated 80 chars); continuation replays prior messages to the LLM.
   - `GET /conversations` — list, most recently updated first; `GET /conversations/:id` — conversation + messages.
 
+## Save conversation → knowledge (slice 8, issue #9)
+
+- `POST /conversations/:id/save` `{folder?, force?}` → `{itemId, path, title}`. `SaveService` sends ALL messages to the LLM (strict-JSON distill prompt: title/summary/tags/markdown article — insights + conclusions, NOT a transcript), then `KnowledgeService.ingest` (vault file + commit + row + embedding). Default folder `conversations`.
+- Provenance both ways: article frontmatter `source: conversation:<id>` (canonical); `conversations.saved_item_id` FK → knowledge_items (nullable, on delete set null).
+- Resave → 409 w/ existing `{itemId, path}`; `force:true` → new file (slug suffix) + pointer moves. Unsaved conversations = plain history, untouched.
+- `GET /conversations` list rows include `savedItemId` + `savedPath` (left join).
+- `rebuild-index` wipes knowledge_items (nulls pointers via FK), then re-links `saved_item_id` from `source: conversation:*` frontmatter — provenance survives rebuilds. Force-resaved convs: newest item wins.
+
 ## Prod (docker)
 
 - Deploy: `make deploy` in `/srv/apps/pkos` (git pull, pnpm install, `docker compose up -d --build`).
