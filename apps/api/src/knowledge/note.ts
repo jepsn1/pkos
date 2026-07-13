@@ -1,5 +1,12 @@
 import matter from 'gray-matter';
 
+/** Typed outgoing edge in frontmatter. `type` validated against the db enum at the API. */
+export interface NoteRelationship {
+  type: string;
+  /** Vault-relative path of the target note, e.g. faith/reflections/on-mercy.md */
+  path: string;
+}
+
 /** Frontmatter carried by every vault note. Vault is canonical; db is derived. */
 export interface NoteMeta {
   title: string;
@@ -9,6 +16,8 @@ export interface NoteMeta {
   importance?: number;
   /** ISO date (YYYY-MM-DD). */
   created: string;
+  /** Outgoing typed edges; canonical form of the `relationships` db table. */
+  relationships?: NoteRelationship[];
 }
 
 export interface Note {
@@ -17,7 +26,7 @@ export interface Note {
 }
 
 export function serializeNote(note: Note): string {
-  const { title, source, tags, summary, importance, created } = note.meta;
+  const { title, source, tags, summary, importance, created, relationships } = note.meta;
   // Omit empty optionals so frontmatter stays clean
   const data: Record<string, unknown> = { title };
   if (source) data.source = source;
@@ -25,6 +34,9 @@ export function serializeNote(note: Note): string {
   if (summary) data.summary = summary;
   if (importance !== undefined) data.importance = importance;
   data.created = created;
+  if (relationships?.length) {
+    data.relationships = relationships.map(({ type, path }) => ({ type, path }));
+  }
   return matter.stringify(`\n${note.body.trim()}\n`, data);
 }
 
@@ -40,9 +52,25 @@ export function parseNote(raw: string): Note | null {
       summary: typeof data.summary === 'string' ? data.summary : undefined,
       importance: typeof data.importance === 'number' ? data.importance : undefined,
       created: toIsoDate(data.created),
+      relationships: parseRelationships(data.relationships),
     },
     body: content.trim(),
   };
+}
+
+/** Keep only well-formed `{type, path}` entries; undefined when none survive. */
+function parseRelationships(value: unknown): NoteRelationship[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const rels = value
+    .filter(
+      (r): r is { type: string; path: string } =>
+        typeof r === 'object' &&
+        r !== null &&
+        typeof (r as Record<string, unknown>).type === 'string' &&
+        typeof (r as Record<string, unknown>).path === 'string',
+    )
+    .map(({ type, path }) => ({ type, path }));
+  return rels.length > 0 ? rels : undefined;
 }
 
 /** js-yaml parses bare dates into Date objects — normalize back to YYYY-MM-DD. */

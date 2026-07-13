@@ -1,4 +1,10 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  GRAPH_RETRIEVAL,
+  relationLabel,
+  type GraphNeighbor,
+  type GraphRetrieval,
+} from '../graph/graph.retrieval';
 import { EMBEDDING_PROVIDER, type EmbeddingProvider } from '../knowledge/embedding.provider';
 import { KNOWLEDGE_REPO, type KnowledgeRepo, type SearchHit } from '../knowledge/knowledge.repo';
 import { VaultService } from '../knowledge/vault.service';
@@ -43,6 +49,7 @@ export class ChatService {
     @Inject(EMBEDDING_PROVIDER) private readonly embedder: EmbeddingProvider,
     @Inject(LLM_PROVIDER) private readonly llm: LlmProvider,
     private readonly vault: VaultService,
+    @Inject(GRAPH_RETRIEVAL) private readonly graph: GraphRetrieval,
   ) {}
 
   async chat(message: string, conversationId?: string): Promise<ChatResult> {
@@ -62,14 +69,24 @@ export class ChatService {
     const hits = (await this.knowledge.search(embedding, TOP_K)).filter(
       (h) => h.score >= minScore,
     );
-    const citations: Citation[] = hits.map(({ path, title, score }) => ({
-      path,
-      title,
-      score,
-    }));
+    // Graph-augmented retrieval: 1-hop neighbors of the hits join the context.
+    const neighbors = (await this.graph.neighbors(hits.map((h) => h.id))).filter(
+      (n) => !hits.some((h) => h.path === n.path),
+    );
+    const citations: Citation[] = [
+      ...hits.map(({ path, title, score }): Citation => ({ path, title, score })),
+      ...neighbors.map(
+        (n): Citation => ({
+          path: n.path,
+          title: n.title,
+          via: 'graph',
+          relation: relationLabel(n),
+        }),
+      ),
+    ];
 
     const llmMessages: LlmMessage[] = [
-      { role: 'system', content: await this.systemPrompt(hits) },
+      { role: 'system', content: await this.systemPrompt(hits, neighbors) },
       ...history.map(({ role, content }): LlmMessage => ({ role, content })),
       { role: 'user', content: message },
     ];
@@ -103,8 +120,8 @@ export class ChatService {
     return { ...conversation, messages };
   }
 
-  /** Retrieval hits rendered with their vault bodies so the model can ground on them. */
-  private async systemPrompt(hits: SearchHit[]): Promise<string> {
+  /** Retrieval hits + their graph neighbors rendered with vault bodies for grounding. */
+  private async systemPrompt(hits: SearchHit[], neighbors: GraphNeighbor[] = []): Promise<string> {
     if (hits.length === 0) return SYSTEM_NO_HITS;
     const items = await Promise.all(
       hits.map(async (h, i) => {
@@ -113,7 +130,18 @@ export class ChatService {
         return `[${i + 1}] path: ${h.path}\ntitle: ${h.title}\n${body}`;
       }),
     );
-    return `${SYSTEM_BASE}\n\nKnowledge items:\n\n${items.join('\n\n---\n\n')}`;
+    let prompt = `${SYSTEM_BASE}\n\nKnowledge items:\n\n${items.join('\n\n---\n\n')}`;
+    if (neighbors.length > 0) {
+      const linked = await Promise.all(
+        neighbors.map(async (n, i) => {
+          const note = await this.vault.readNote(n.path);
+          const body = note?.body ?? n.summary ?? '';
+          return `[G${i + 1}] ${relationLabel(n)}: ${n.title} (${n.path}) — linked to ${n.of}\n${body}`;
+        }),
+      );
+      prompt += `\n\nGraph-linked items (explicitly connected to the notes above; each is labeled with its relationship type):\n\n${linked.join('\n\n---\n\n')}`;
+    }
+    return prompt;
   }
 }
 

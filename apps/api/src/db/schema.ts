@@ -3,9 +3,11 @@ import {
   index,
   integer,
   jsonb,
+  pgEnum,
   pgTable,
   text,
   timestamp,
+  unique,
   uuid,
   vector,
 } from 'drizzle-orm/pg-core';
@@ -38,12 +40,54 @@ export const knowledgeItems = pgTable(
   ],
 );
 
+/** PRD "Knowledge Relationships" edge types. */
+export const RELATIONSHIP_TYPES = [
+  'related_to',
+  'references',
+  'supports',
+  'contradicts',
+  'parent',
+  'child',
+  'mentioned_in',
+  'written_by',
+] as const;
+
+export type RelationshipType = (typeof RELATIONSHIP_TYPES)[number];
+
+export const relationshipType = pgEnum('relationship_type', RELATIONSHIP_TYPES);
+
+// DERIVED data — canonical form is `relationships: [{type, path}]` in the from-item's
+// vault frontmatter. `rebuild-index` second pass restores these rows (paths → ids).
+export const relationships = pgTable(
+  'relationships',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    fromItem: uuid('from_item')
+      .notNull()
+      .references(() => knowledgeItems.id, { onDelete: 'cascade' }),
+    toItem: uuid('to_item')
+      .notNull()
+      .references(() => knowledgeItems.id, { onDelete: 'cascade' }),
+    type: relationshipType('type').notNull(),
+    created: timestamp('created', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('relationships_from_to_type_uq').on(t.fromItem, t.toItem, t.type),
+    index('relationships_from_item_idx').on(t.fromItem),
+    index('relationships_to_item_idx').on(t.toItem),
+  ],
+);
+
 /** Knowledge item cited by an assistant answer (stored as jsonb on the message). */
 export interface Citation {
   path: string;
   title: string;
-  /** Cosine similarity of the item to the query, [-1, 1]. */
-  score: number;
+  /** Cosine similarity of the item to the query, [-1, 1]. Absent for graph-sourced items. */
+  score?: number;
+  /** 'graph' when the item entered context via a relationship edge, not vector search. */
+  via?: 'graph';
+  /** Relationship label for graph-sourced items, e.g. 'related_to' or 'references (incoming)'. */
+  relation?: string;
 }
 
 // PRIMARY data (unlike knowledge_items): conversations exist only here.
