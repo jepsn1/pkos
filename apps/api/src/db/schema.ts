@@ -2,6 +2,7 @@ import {
   date,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -35,4 +36,37 @@ export const knowledgeItems = pgTable(
       t.embedding.op('vector_cosine_ops'),
     ),
   ],
+);
+
+/** Knowledge item cited by an assistant answer (stored as jsonb on the message). */
+export interface Citation {
+  path: string;
+  title: string;
+  /** Cosine similarity of the item to the query, [-1, 1]. */
+  score: number;
+}
+
+// PRIMARY data (unlike knowledge_items): conversations exist only here.
+export const conversations = pgTable('conversations', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  /** Derived from the first user message, truncated. */
+  title: text('title').notNull(),
+  created: timestamp('created', { withTimezone: true }).notNull().defaultNow(),
+  updated: timestamp('updated', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const messages = pgTable(
+  'messages',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    role: text('role', { enum: ['user', 'assistant'] }).notNull(),
+    content: text('content').notNull(),
+    /** Assistant messages only: knowledge items the answer was grounded in. */
+    citations: jsonb('citations').$type<Citation[]>(),
+    created: timestamp('created', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('messages_conversation_id_idx').on(t.conversationId)],
 );
