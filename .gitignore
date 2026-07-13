@@ -1,2 +1,7 @@
+node_modules/
+dist/
 .env
-node_modules
+.env.*
+!.env.example
+coverage/
+.claude/worktrees/

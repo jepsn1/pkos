@@ -1,0 +1,14 @@
+{
+  "name": "pkos",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter @pkos/shared build && pnpm --filter @pkos/api dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.10.0"
+}
