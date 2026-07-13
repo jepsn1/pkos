@@ -5,3 +5,4 @@ dist/
 !.env.example
 coverage/
 .claude/worktrees/
+tmp-vault/

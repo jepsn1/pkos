@@ -62,6 +62,16 @@ export class VaultService {
     return relPath;
   }
 
+  /** Rewrite an existing note in place and commit. Throws when the file is missing. */
+  async updateNote(relPath: string, note: Note, message: string): Promise<void> {
+    if (!(await this.exists(relPath))) {
+      throw new BadRequestException(`no such vault file: ${relPath}`);
+    }
+    await fs.writeFile(path.join(this.root, relPath), serializeNote(note), 'utf8');
+    await this.git(['add', relPath]);
+    await this.git(['commit', '-m', message]);
+  }
+
   async readNote(relPath: string): Promise<Note | null> {
     try {
       const raw = await fs.readFile(path.join(this.root, relPath), 'utf8');

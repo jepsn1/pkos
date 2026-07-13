@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { GraphNeighbor, GraphRetrieval } from '../graph/graph.retrieval';
 import type { EmbeddingProvider } from '../knowledge/embedding.provider';
 import type { KnowledgeRepo, SearchHit } from '../knowledge/knowledge.repo';
 import { VaultService } from '../knowledge/vault.service';
@@ -124,9 +125,10 @@ afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
-function makeService(hits: SearchHit[]): ChatService {
+function makeService(hits: SearchHit[], neighbors: GraphNeighbor[] = []): ChatService {
   const vault = new VaultService(root, async () => {});
-  return new ChatService(repo, knowledgeRepoWith(hits), fakeEmbedder, llm, vault);
+  const graph: GraphRetrieval = { neighbors: async () => neighbors };
+  return new ChatService(repo, knowledgeRepoWith(hits), fakeEmbedder, llm, vault, graph);
 }
 
 describe('ChatService.chat', () => {
@@ -166,6 +168,66 @@ describe('ChatService.chat', () => {
     // body read from the vault, not just the db summary
     expect(system.content).toContain('unmerited favor, given freely');
     expect(user).toEqual({ role: 'user', content: 'grace?' });
+  });
+
+  it('adds 1-hop graph neighbors to prompt (relationship-labeled) and citations (via: graph)', async () => {
+    const neighbor: GraphNeighbor = {
+      id: 'k2',
+      path: 'faith/reflections/on-mercy.md',
+      title: 'On Mercy',
+      summary: 'Mercy withholds judgment.',
+      type: 'related_to',
+      direction: 'out',
+      of: 'faith/reflections/on-grace.md',
+    };
+    const service = makeService([GRACE_HIT], [neighbor]);
+
+    const res = await service.chat('what connects to grace?');
+
+    const system = llm.calls[0][0].content;
+    expect(system).toContain('Graph-linked items');
+    expect(system).toContain('related_to: On Mercy (faith/reflections/on-mercy.md)');
+    // vector hit keeps its score; graph item is flagged instead
+    expect(res.citations).toEqual([
+      { path: 'faith/reflections/on-grace.md', title: 'On Grace', score: 0.72 },
+      {
+        path: 'faith/reflections/on-mercy.md',
+        title: 'On Mercy',
+        via: 'graph',
+        relation: 'related_to',
+      },
+    ]);
+    expect(repo.messages[1].citations).toEqual(res.citations);
+  });
+
+  it('incoming edges are labeled and neighbors already in hits are not duplicated', async () => {
+    const incoming: GraphNeighbor = {
+      id: 'k9',
+      path: 'faith/bible-study/romans-8.md',
+      title: 'Romans 8',
+      summary: null,
+      type: 'references',
+      direction: 'in',
+      of: 'faith/reflections/on-grace.md',
+    };
+    const alreadyHit: GraphNeighbor = {
+      ...incoming,
+      id: 'k2',
+      path: 'faith/reflections/on-mercy.md',
+      title: 'On Mercy',
+    };
+    const service = makeService([GRACE_HIT, MERCY_HIT], [incoming, alreadyHit]);
+
+    const res = await service.chat('grace?');
+
+    const system = llm.calls[0][0].content;
+    expect(system).toContain('references (incoming): Romans 8 (faith/bible-study/romans-8.md)');
+    // neighbor that is already a hit: relationship still labeled in the prompt,
+    // body not repeated, no duplicate citation
+    expect(system).toContain('references (incoming): On Mercy (faith/reflections/on-mercy.md)');
+    expect(system).toContain('(full note shown above)');
+    expect(res.citations.filter((c) => c.path === 'faith/reflections/on-mercy.md')).toHaveLength(1);
+    expect(res.citations.find((c) => c.via === 'graph')?.relation).toBe('references (incoming)');
   });
 
   it('below-threshold hits: empty citations + honest-answer instruction, no item leak', async () => {
