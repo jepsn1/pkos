@@ -9,17 +9,20 @@ Self-hosted, AI-native personal knowledge system. One assistant, private data, d
 - LLM: local Ollama (Qwen) on the RX 6900 XT via ROCm, behind a provider interface.
 - Exposure: Tailscale-only. No public domain.
 
-## Layout (planned, mirrors biblestdy)
+## Layout (mirrors biblestdy)
 
 ```
-apps/api        NestJS + Drizzle
+apps/api        NestJS + Drizzle + Vitest (dev: localhost:3002, prefix /api)
 apps/web        (phase 2) React SPA — phase 1 uses Open WebUI
-apps/worker     transcription/embedding jobs (whisper)
-packages/       shared TS types
+apps/worker     (planned) transcription/embedding jobs (whisper)
+packages/shared shared TS types
 ```
+
+Dev + deploy workflow: `AGENTS.md`.
 
 ## Services
 
 `docker-compose.yml`:
 
+- `pkos-api` — built from `Dockerfile`, healthcheck on `/api/health`, published only on the host's tailscale IP (`TAILSCALE_IP` in `.env`), port 3002
 - `pkos-ollama` — ollama/ollama:rocm, GPU via /dev/kfd + /dev/dri, models in /srv/data/ollama, dev access 127.0.0.1:11434
