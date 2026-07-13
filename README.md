@@ -10,6 +10,7 @@ Self-hosted, AI-native personal knowledge system. One assistant, private data, d
 - Chat API: `POST /api/chat` `{message, conversationId?}` — retrieval-grounded answer w/ citations `{path, title, score}`; honest "nothing relevant" when retrieval misses. Conversations persisted: `GET /api/conversations[/:id]`.
 - Long-term memory: `POST /api/conversations/:id/save` — LLM distills the conversation into a vault article (frontmatter `source: conversation:<id>`), ingested like any knowledge (file + commit + embedding) so later chats retrieve it. Conversation keeps a `saved_item_id` pointer; unsaved conversations stay plain history.
 - LLM: local Ollama (Qwen) on the RX 6900 XT via ROCm, behind a provider interface (`LlmProvider`, `LLM_MODEL` default `qwen3:14b`).
+- Frontend phase 1: Open WebUI (`pkos-webui`) wired to the api's OpenAI-compatible surface — `GET /v1/models` (single model `pkos`) + `POST /v1/chat/completions` (bearer `OPENAI_COMPAT_API_KEY`), so chats hit pkos retrieval + citations (markdown "Sources:" footer), never raw ollama. Phone via Tailscale, port 8081.
 - Exposure: Tailscale-only. No public domain.
 
 ## Layout (mirrors biblestdy)
@@ -28,4 +29,5 @@ Dev + deploy workflow: `AGENTS.md`.
 `docker-compose.yml`:
 
 - `pkos-api` — built from `Dockerfile`, healthcheck on `/api/health`, published only on the host's tailscale IP (`TAILSCALE_IP` in `.env`), port 3002
+- `pkos-webui` — ghcr.io/open-webui/open-webui:main, state in /srv/data/webui, talks to `pkos-api:3002/v1` with `OPENAI_COMPAT_API_KEY`, tailscale-only port 8081. First browser visit creates the admin account.
 - `pkos-ollama` — ollama/ollama:rocm, GPU via /dev/kfd + /dev/dri, models in /srv/data/ollama, dev access 127.0.0.1:11434

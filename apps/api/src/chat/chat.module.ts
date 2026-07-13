@@ -18,5 +18,6 @@ import { SaveService } from './save.service';
     // bind: undici's fetch throws "Illegal invocation" when called detached
     { provide: LLM_FETCH, useValue: globalThis.fetch.bind(globalThis) },
   ],
+  exports: [ChatService],
 })
 export class ChatModule {}

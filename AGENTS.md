@@ -43,10 +43,20 @@ pnpm 11 monorepo (mirrors biblestdy): `apps/api` (NestJS + Drizzle + Vitest, pre
 - `GET /conversations` list rows include `savedItemId` + `savedPath` (left join).
 - `rebuild-index` wipes knowledge_items (nulls pointers via FK), then re-links `saved_item_id` from `source: conversation:*` frontmatter — provenance survives rebuilds. Force-resaved convs: newest item wins.
 
+## Frontend: Open WebUI + OpenAI-compat surface (slice 5, issue #6)
+
+- Api exposes an OpenAI-compatible surface at **root `/v1`** (excluded from the `/api` prefix in `main.ts` — OpenAI clients hardcode `/v1`), module `apps/api/src/openai-compat/`:
+  - `GET /v1/models` — single model, id `pkos`.
+  - `POST /v1/chat/completions` — OpenAI request → `ChatService.answer()` (retrieval + grounded qwen3 answer) → OpenAI response. Citations appended to assistant content as a markdown `**Sources:**` footer (`path — title (score)`). `stream:true` supported: SSE with the finished answer as one content chunk (underlying LLM call is non-streaming).
+  - Auth: `Authorization: Bearer $OPENAI_COMPAT_API_KEY` (env, both .env files; unset ⇒ fails closed, all 401).
+  - **Stateless by design**: OpenAI clients resend full history every turn; last user msg drives retrieval, prior user/assistant turns replayed to the LLM, client system prompts dropped (grounding owns the system slot). Nothing written to `conversations`/`messages` — those belong to native `/api/chat`. Open WebUI persists its own chats in /srv/data/webui.
+- `pkos-webui` container (ghcr.io/open-webui/open-webui:main): `OPENAI_API_BASE_URL=http://pkos-api:3002/v1`, `OPENAI_API_KEY=$OPENAI_COMPAT_API_KEY`, `ENABLE_OLLAMA_API=false` (never raw ollama), published `${TAILSCALE_IP}:8081:8080`, state volume /srv/data/webui.
+- **First login**: first browser visit to :8081 shows a signup form — that account becomes admin; later signups need admin approval. Model `pkos` is preselected (only one).
+
 ## Prod (docker)
 
 - Deploy: `make deploy` in `/srv/apps/pkos` (git pull, pnpm install, `docker compose up -d --build`).
-- Containers: `pkos-api` (built from `Dockerfile`) + `pkos-ollama`, both on shared external `web` network.
+- Containers: `pkos-api` (built from `Dockerfile`) + `pkos-webui` (port 8081) + `pkos-ollama`, all on shared external `web` network.
 - **Exposure is Tailscale-only — no caddy site, no public domain.** The api port is published as `${TAILSCALE_IP}:3002:3002`; set `TAILSCALE_IP` in root `.env` to `tailscale ip -4`. NEVER bind 0.0.0.0 (docker published ports bypass UFW).
   - NOTE 2026-07-13: tailscale not yet installed on this host — `TAILSCALE_IP=127.0.0.1` placeholder until then. Side effect: prod container and native dev api both want 127.0.0.1:3002 — stop one to run the other (`docker stop pkos-api`). Goes away once the real tailscale IP is set.
 - Health: `GET /api/health` → 200 with real checks (db `SELECT 1` + vector extension, ollama `GET /api/tags`); any dep down → 503 with the failing check in the body. Compose healthcheck hits it.

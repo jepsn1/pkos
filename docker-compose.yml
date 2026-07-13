@@ -27,6 +27,24 @@ services:
       timeout: 5s
       retries: 3
 
+  webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: pkos-webui
+    restart: unless-stopped
+    volumes:
+      # webui's own state (accounts, its chat history) — NOT pkos data
+      - /srv/data/webui:/app/backend/data
+    networks: [web]
+    environment:
+      # Talk to the pkos assistant (OpenAI-compat surface, model "pkos"),
+      # NOT raw ollama — retrieval + citations happen in the api.
+      OPENAI_API_BASE_URL: http://pkos-api:3002/v1
+      OPENAI_API_KEY: ${OPENAI_COMPAT_API_KEY:?set OPENAI_COMPAT_API_KEY in .env}
+      ENABLE_OLLAMA_API: "false"
+    ports:
+      # Tailscale-only, same rule as the api port
+      - "${TAILSCALE_IP:?set TAILSCALE_IP in .env}:8081:8080"
+
   ollama:
     image: ollama/ollama:rocm
     container_name: pkos-ollama

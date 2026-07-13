@@ -57,23 +57,10 @@ export class ChatService {
       conversation = await this.repo.createConversation(deriveTitle(message));
     }
 
-    const embedding = await this.embedder.embed(message);
-    const minScore = Number(process.env.RETRIEVAL_MIN_SCORE ?? DEFAULT_MIN_SCORE);
-    const hits = (await this.knowledge.search(embedding, TOP_K)).filter(
-      (h) => h.score >= minScore,
+    const { answer, citations } = await this.answer(
+      message,
+      history.map(({ role, content }): LlmMessage => ({ role, content })),
     );
-    const citations: Citation[] = hits.map(({ path, title, score }) => ({
-      path,
-      title,
-      score,
-    }));
-
-    const llmMessages: LlmMessage[] = [
-      { role: 'system', content: await this.systemPrompt(hits) },
-      ...history.map(({ role, content }): LlmMessage => ({ role, content })),
-      { role: 'user', content: message },
-    ];
-    const answer = stripThink(await this.llm.chat(llmMessages));
 
     await this.repo.addMessage({
       conversationId: conversation.id,
@@ -90,6 +77,36 @@ export class ChatService {
     await this.repo.touchConversation(conversation.id);
 
     return { conversationId: conversation.id, answer, citations };
+  }
+
+  /**
+   * Stateless core: retrieval on `message` + grounded LLM answer with citations.
+   * `history` is replayed to the LLM but nothing is persisted — callers that own
+   * their own conversation state (e.g. the OpenAI-compat surface, where the client
+   * resends full history every turn) use this directly.
+   */
+  async answer(
+    message: string,
+    history: LlmMessage[] = [],
+  ): Promise<{ answer: string; citations: Citation[] }> {
+    const embedding = await this.embedder.embed(message);
+    const minScore = Number(process.env.RETRIEVAL_MIN_SCORE ?? DEFAULT_MIN_SCORE);
+    const hits = (await this.knowledge.search(embedding, TOP_K)).filter(
+      (h) => h.score >= minScore,
+    );
+    const citations: Citation[] = hits.map(({ path, title, score }) => ({
+      path,
+      title,
+      score,
+    }));
+
+    const llmMessages: LlmMessage[] = [
+      { role: 'system', content: await this.systemPrompt(hits) },
+      ...history,
+      { role: 'user', content: message },
+    ];
+    const answer = stripThink(await this.llm.chat(llmMessages));
+    return { answer, citations };
   }
 
   async listConversations(): Promise<Conversation[]> {
