@@ -205,6 +205,10 @@ describe('ChatService.chat', () => {
 
     const system = llm.calls[0][0].content;
     expect(system).toContain('references (incoming): Romans 8 (faith/bible-study/romans-8.md)');
+    // neighbor that is already a hit: relationship still labeled in the prompt,
+    // body not repeated, no duplicate citation
+    expect(system).toContain('references (incoming): On Mercy (faith/reflections/on-mercy.md)');
+    expect(system).toContain('(full note shown above)');
     expect(res.citations.filter((c) => c.path === 'faith/reflections/on-mercy.md')).toHaveLength(1);
     expect(res.citations.find((c) => c.via === 'graph')?.relation).toBe('references (incoming)');
   });

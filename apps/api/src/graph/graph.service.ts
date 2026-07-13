@@ -118,9 +118,9 @@ export class GraphService implements GraphRetrieval {
     return { root: itemId, depth: clamped, ...hood };
   }
 
-  /** 1-hop neighbors of retrieval hits, deduped, hits themselves excluded. */
+  /** 1-hop neighbors of retrieval hits: one entry per unique edge touching a hit. */
   async neighbors(itemIds: string[]): Promise<GraphNeighbor[]> {
-    const seen = new Set(itemIds);
+    const seenEdges = new Set<string>();
     const out: GraphNeighbor[] = [];
     for (const id of itemIds) {
       const { nodes, edges } = await this.rels.neighborhood(id, 1);
@@ -128,11 +128,12 @@ export class GraphService implements GraphRetrieval {
       const rootPath = byId.get(id)?.path ?? id;
       for (const e of edges) {
         if (e.fromId !== id && e.toId !== id) continue;
+        if (seenEdges.has(e.id)) continue;
         const neighborId = e.fromId === id ? e.toId : e.fromId;
-        if (seen.has(neighborId)) continue;
+        if (neighborId === id) continue;
         const node = byId.get(neighborId);
         if (!node) continue;
-        seen.add(neighborId);
+        seenEdges.add(e.id);
         out.push({
           id: node.id,
           path: node.path,

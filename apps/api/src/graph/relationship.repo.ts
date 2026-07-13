@@ -1,6 +1,12 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { relationships, RELATIONSHIP_TYPES, type RelationshipType } from '../db/schema';
+import { alias } from 'drizzle-orm/pg-core';
+import {
+  knowledgeItems,
+  relationships,
+  RELATIONSHIP_TYPES,
+  type RelationshipType,
+} from '../db/schema';
 
 export type { RelationshipType };
 export { RELATIONSHIP_TYPES };
@@ -124,22 +130,22 @@ export class DrizzleRelationshipRepo implements RelationshipRepo {
     const ids = nodes.map((n) => n.id);
     if (ids.length === 0) return { nodes, edges: [] };
 
-    const edgeRes = await this.db.execute(sql`
-      SELECT r.id, r.from_item, kf.path AS from_path, r.to_item, kt.path AS to_path, r.type
-      FROM relationships r
-      JOIN knowledge_items kf ON kf.id = r.from_item
-      JOIN knowledge_items kt ON kt.id = r.to_item
-      WHERE r.from_item = ANY(${ids}::uuid[]) AND r.to_item = ANY(${ids}::uuid[])
-      ORDER BY kf.path, kt.path, r.type
-    `);
-    const edges: GraphEdge[] = edgeRes.rows.map((r) => ({
-      id: r.id as string,
-      fromId: r.from_item as string,
-      fromPath: r.from_path as string,
-      toId: r.to_item as string,
-      toPath: r.to_path as string,
-      type: r.type as RelationshipType,
-    }));
+    const kf = alias(knowledgeItems, 'kf');
+    const kt = alias(knowledgeItems, 'kt');
+    const edges: GraphEdge[] = await this.db
+      .select({
+        id: relationships.id,
+        fromId: relationships.fromItem,
+        fromPath: kf.path,
+        toId: relationships.toItem,
+        toPath: kt.path,
+        type: relationships.type,
+      })
+      .from(relationships)
+      .innerJoin(kf, eq(kf.id, relationships.fromItem))
+      .innerJoin(kt, eq(kt.id, relationships.toItem))
+      .where(and(inArray(relationships.fromItem, ids), inArray(relationships.toItem, ids)))
+      .orderBy(kf.path, kt.path, relationships.type);
     return { nodes, edges };
   }
 }

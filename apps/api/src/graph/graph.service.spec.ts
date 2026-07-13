@@ -298,7 +298,7 @@ describe('GraphService.graph traversal', () => {
 });
 
 describe('GraphService.neighbors (chat retrieval seam)', () => {
-  it('returns deduped 1-hop neighbors with direction, excluding the hits', async () => {
+  it('returns 1-hop neighbors with direction, one entry per unique edge', async () => {
     await service.createEdge({ fromPath: GRACE.path, toPath: MERCY.path, type: 'related_to' });
     await service.createEdge({ fromPath: ROMANS.path, toPath: GRACE.path, type: 'references' });
 
@@ -321,9 +321,13 @@ describe('GraphService.neighbors (chat retrieval seam)', () => {
       }),
     ]);
 
-    // hit set members never come back as neighbors
-    const none = await service.neighbors([GRACE.id, MERCY.id, ROMANS.id]);
-    expect(none).toEqual([]);
+    // multiple hits sharing edges: each edge reported exactly once
+    const all = await service.neighbors([GRACE.id, MERCY.id, ROMANS.id]);
+    expect(all).toHaveLength(2);
+    expect(all.map((n) => `${n.of} ${n.direction} ${n.type}`).sort()).toEqual([
+      `${GRACE.path} in references`,
+      `${GRACE.path} out related_to`,
+    ]);
   });
 });
 

@@ -70,20 +70,14 @@ export class ChatService {
       (h) => h.score >= minScore,
     );
     // Graph-augmented retrieval: 1-hop neighbors of the hits join the context.
-    const neighbors = (await this.graph.neighbors(hits.map((h) => h.id))).filter(
-      (n) => !hits.some((h) => h.path === n.path),
+    const neighbors = await this.graph.neighbors(hits.map((h) => h.id));
+    const citations: Citation[] = hits.map(
+      ({ path, title, score }): Citation => ({ path, title, score }),
     );
-    const citations: Citation[] = [
-      ...hits.map(({ path, title, score }): Citation => ({ path, title, score })),
-      ...neighbors.map(
-        (n): Citation => ({
-          path: n.path,
-          title: n.title,
-          via: 'graph',
-          relation: relationLabel(n),
-        }),
-      ),
-    ];
+    for (const n of neighbors) {
+      if (citations.some((c) => c.path === n.path)) continue; // hit or earlier neighbor
+      citations.push({ path: n.path, title: n.title, via: 'graph', relation: relationLabel(n) });
+    }
 
     const llmMessages: LlmMessage[] = [
       { role: 'system', content: await this.systemPrompt(hits, neighbors) },
@@ -132,10 +126,12 @@ export class ChatService {
     );
     let prompt = `${SYSTEM_BASE}\n\nKnowledge items:\n\n${items.join('\n\n---\n\n')}`;
     if (neighbors.length > 0) {
+      const hitPaths = new Set(hits.map((h) => h.path));
       const linked = await Promise.all(
         neighbors.map(async (n, i) => {
-          const note = await this.vault.readNote(n.path);
-          const body = note?.body ?? n.summary ?? '';
+          const body = hitPaths.has(n.path)
+            ? '(full note shown above)'
+            : ((await this.vault.readNote(n.path))?.body ?? n.summary ?? '');
           return `[G${i + 1}] ${relationLabel(n)}: ${n.title} (${n.path}) — linked to ${n.of}\n${body}`;
         }),
       );
