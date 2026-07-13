@@ -1,0 +1,94 @@
+"""pkos transcription worker: poll sermon_jobs, whisper, chunk, embed, store.
+
+Env: DATABASE_URL (required), UPLOADS_PATH (required), OLLAMA_URL,
+EMBEDDING_MODEL, WHISPER_MODEL (default small), POLL_INTERVAL_SEC,
+STALE_PROCESSING_MIN (processing rows older than this are re-queued).
+"""
+
+import json
+import logging
+import os
+import time
+import urllib.request
+
+import psycopg
+
+from jobs import DEFAULT_STALE_PROCESSING_MIN, PgJobStore, process_one
+
+log = logging.getLogger("pkos-worker")
+
+# Shared ollama is queued on by several consumers — be patient.
+EMBED_TIMEOUT_SEC = 300
+EMBED_RETRIES = 3
+
+
+class OllamaEmbedder:
+    def __init__(self, base_url: str, model: str):
+        self.url = f"{base_url}/api/embed"
+        self.model = model
+
+    def embed(self, text: str) -> list[float]:
+        body = json.dumps({"model": self.model, "input": text}).encode()
+        req = urllib.request.Request(
+            self.url, data=body, headers={"content-type": "application/json"}
+        )
+        last = None
+        for attempt in range(EMBED_RETRIES):
+            try:
+                with urllib.request.urlopen(req, timeout=EMBED_TIMEOUT_SEC) as res:
+                    data = json.load(res)
+                embedding = (data.get("embeddings") or [[]])[0]
+                if not embedding:
+                    raise ValueError("ollama returned no embedding")
+                return embedding
+            except Exception as e:  # noqa: BLE001
+                last = e
+                time.sleep(2**attempt)
+        raise RuntimeError(f"ollama embed failed after {EMBED_RETRIES} tries: {last}")
+
+
+class WhisperTranscriber:
+    """Lazy-loads the model: first job pays the download, idle worker stays lean."""
+
+    def __init__(self, model_name: str):
+        self.model_name = model_name
+        self._model = None
+
+    def transcribe(self, audio_path: str):
+        if self._model is None:
+            from faster_whisper import WhisperModel
+
+            log.info("loading whisper model %s (cpu/int8)", self.model_name)
+            self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
+        segments, _info = self._model.transcribe(audio_path)
+        return segments
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    dsn = os.environ["DATABASE_URL"]
+    uploads = os.environ["UPLOADS_PATH"]
+    poll_sec = float(os.environ.get("POLL_INTERVAL_SEC", "5"))
+    stale_min = int(os.environ.get("STALE_PROCESSING_MIN", str(DEFAULT_STALE_PROCESSING_MIN)))
+
+    transcriber = WhisperTranscriber(os.environ.get("WHISPER_MODEL", "small"))
+    embedder = OllamaEmbedder(
+        os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434"),
+        os.environ.get("EMBEDDING_MODEL", "nomic-embed-text"),
+    )
+    resolve_audio = lambda rel: os.path.join(uploads, rel)  # noqa: E731
+
+    log.info("worker up: polling every %ss, stale-processing=%smin", poll_sec, stale_min)
+    while True:
+        try:
+            with psycopg.connect(dsn) as conn:
+                store = PgJobStore(conn, stale_minutes=stale_min)
+                while process_one(store, transcriber, embedder, resolve_audio):
+                    pass
+        except Exception:  # noqa: BLE001 — db hiccup: back off, reconnect
+            log.exception("worker loop error; retrying in %ss", poll_sec)
+        time.sleep(poll_sec)
+
+
+if __name__ == "__main__":
+    main()

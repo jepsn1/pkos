@@ -64,6 +64,16 @@ pnpm 11 monorepo (mirrors biblestdy): `apps/api` (NestJS + Drizzle + Vitest, pre
 - `pkos-webui` container (ghcr.io/open-webui/open-webui:main): `OPENAI_API_BASE_URL=http://pkos-api:3002/v1`, `OPENAI_API_KEY=$OPENAI_COMPAT_API_KEY`, `ENABLE_OLLAMA_API=false` (never raw ollama), published `${TAILSCALE_IP}:8081:8080`, state volume /srv/data/webui.
 - **First login**: first browser visit to :8081 shows a signup form — that account becomes admin; later signups need admin approval. Model `pkos` is preselected (only one).
 
+## Sermons (slice 7, issue #7)
+
+- Flow: `POST /api/sermons` multipart `file` (mp3/m4a/wav only, else 400) → audio saved under `UPLOADS_PATH` (random name; db stores path relative to it) → `sermon_jobs` row status `queued` → python worker transcribes → transcript on the job + ~500-word `transcript_chunks` (timestamps + 768-dim embeddings, hnsw cosine index) → status `done` (failures: `error` + message).
+- `UPLOADS_PATH`: dev = gitignored `<repo>/.uploads` (default), prod = `/uploads` (compose mounts `/srv/data/uploads/pkos`; create host dir once, chown 1000:1000).
+- Endpoints (prefix `/api`): `POST /sermons` → job row; `GET /sermons` — jobs newest first (no transcript); `GET /sermons/:id` — full job incl. transcript when done.
+- `GET /search` now returns a **union**: knowledge items (`type: "knowledge"`) + sermon chunks (`type: "sermon"`, with `jobId`, `text`, `seq`, `startSec`/`endSec`), merged by cosine score, one `limit`.
+- Worker (`apps/worker`, python): polls `sermon_jobs` with `FOR UPDATE SKIP LOCKED`; faster-whisper (`WHISPER_MODEL` default `small`, cpu/int8, first job downloads ~460MB into `whisper-cache` volume); embeds chunks via ollama `nomic-embed-text`. Restart-safe: `processing` rows older than `STALE_PROCESSING_MIN` (default 60) are re-queued. Env: `DATABASE_URL`, `UPLOADS_PATH`, `OLLAMA_URL`, `POLL_INTERVAL_SEC` (default 5).
+- Worker dev: `python3 -m venv --without-pip apps/worker/.venv` + get-pip (host python3.14 lacks ensurepip), `pip install -r apps/worker/requirements-dev.txt`, run `python worker.py` with env set; tests `python -m pytest apps/worker` (fakes only — no whisper download, no db).
+- Prod: compose service `worker` (container `pkos-worker`, built from `apps/worker`), same `.env`.
+
 ## Prod (docker)
 
 - Deploy: `make deploy` in `/srv/apps/pkos` (git pull, pnpm install, `docker compose up -d --build`).

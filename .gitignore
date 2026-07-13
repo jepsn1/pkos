@@ -6,3 +6,6 @@ dist/
 coverage/
 .claude/worktrees/
 tmp-vault/
+.uploads/
+.venv/
+__pycache__/

@@ -16,6 +16,9 @@ services:
       # Canonical knowledge vault (jepsn1/knowledge checkout), rw for ingest;
       # VAULT_PATH=/vault in .env points the api at it.
       - /srv/data/knowledge:/vault
+      # Sermon audio uploads; UPLOADS_PATH=/uploads in .env. Create host dir
+      # once: mkdir -p /srv/data/uploads/pkos && chown 1000:1000 (api writes it).
+      - /srv/data/uploads/pkos:/uploads
     networks: [web]
     ports:
       # Tailscale-only exposure: bound to this host's tailscale IPv4 (TAILSCALE_IP
@@ -45,6 +48,19 @@ services:
       # Tailscale-only, same rule as the api port
       - "${TAILSCALE_IP:?set TAILSCALE_IP in .env}:8081:8080"
 
+  # Sermon transcription: polls sermon_jobs, faster-whisper (cpu), embeds
+  # chunks via ollama. Safe to restart any time — stale `processing` jobs are
+  # re-queued (STALE_PROCESSING_MIN, default 60).
+  worker:
+    build: apps/worker
+    container_name: pkos-worker
+    restart: unless-stopped
+    env_file: .env
+    networks: [web]
+    volumes:
+      - /srv/data/uploads/pkos:/uploads   # read audio the api saved
+      - whisper-cache:/root/.cache        # keep the ~460MB model across restarts
+
   ollama:
     image: ollama/ollama:rocm
     container_name: pkos-ollama
@@ -61,3 +77,6 @@ services:
 networks:
   web:
     external: true
+
+volumes:
+  whisper-cache:
