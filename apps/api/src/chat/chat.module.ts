@@ -16,5 +16,6 @@ import { LLM_FETCH, LLM_PROVIDER, OllamaLlmProvider } from './llm.provider';
     // bind: undici's fetch throws "Illegal invocation" when called detached
     { provide: LLM_FETCH, useValue: globalThis.fetch.bind(globalThis) },
   ],
+  exports: [ChatService],
 })
 export class ChatModule {}
