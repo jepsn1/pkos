@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { db } from '../db';
+import { FitnessModule } from '../fitness/fitness.module';
 import { GraphModule } from '../graph/graph.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { ChatController } from './chat.controller';
@@ -9,7 +10,7 @@ import { LLM_FETCH, LLM_PROVIDER, OllamaLlmProvider } from './llm.provider';
 import { SaveService } from './save.service';
 
 @Module({
-  imports: [KnowledgeModule, GraphModule],
+  imports: [KnowledgeModule, GraphModule, FitnessModule],
   controllers: [ChatController],
   providers: [
     ChatService,

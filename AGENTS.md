@@ -74,6 +74,18 @@ pnpm 11 monorepo (mirrors biblestdy): `apps/api` (NestJS + Drizzle + Vitest, pre
 - Worker dev: `python3 -m venv --without-pip apps/worker/.venv` + get-pip (host python3.14 lacks ensurepip), `pip install -r apps/worker/requirements-dev.txt`, run `python worker.py` with env set; tests `python -m pytest apps/worker` (fakes only — no whisper download, no db).
 - Prod: compose service `worker` (container `pkos-worker`, built from `apps/worker`), same `.env`.
 
+## Fitness (slice 11, issue #11)
+
+- Schema (PRIMARY, not vault-derived): `workouts` (date, notes) + `workout_sets` (exercise lowercase-normalized, set_no, reps, weight_kg null = bodyweight), `body_metrics` (date, weight_kg?, calories?, protein_g? — db check ≥1 non-null), `goals`.
+- Logging/querying happens through `POST /api/chat` via LLM tool calls (ollama-native `tools` on /api/chat). `LlmProvider.chat(messages, tools?)`: plain string without tools (legacy), `LlmReply {content, toolCalls}` with them — backward compatible. Tool loop in `ChatService`, max 4 rounds; bad tool args go back to the model as `{error}` instead of throwing.
+- Tools (`src/fitness/fitness-tools.service.ts`, executors behind `FITNESS_REPO` — parameterized queries only, model never writes SQL):
+  - `log_workout` `{date?, exercises: [{exercise, sets: [{reps, weight_kg?}]}], notes?}`
+  - `log_body_metric` `{date?, weight_kg?, calories?, protein_g?}` (≥1 metric)
+  - `query_fitness` `{query: metric_avg|exercise_progression|weekly_volume|recent_workouts, metric?, since?, until?, exercise?, limit?}` — metric_avg defaults to last 7 days incl. today; weeks start Monday.
+- Planner: system prompt appends `FitnessToolsService.routingPrompt()` — routing rules + today's date (qwen3 invents dates otherwise) + "5x5 = five set entries" (it collapsed AxB to one set otherwise). Fitness turns → tools; everything else → existing vector retrieval, unchanged.
+- REST fallback (prefix `/api`): `GET /fitness/workouts` (recent 50 w/ sets), `GET /fitness/metrics` (date desc).
+- `LLM_TIMEOUT_MS` env overrides the 120s ollama timeout (tool loops = several LLM round trips; shared ollama queues).
+
 ## Prod (docker)
 
 - Deploy: `make deploy` in `/srv/apps/pkos` (git pull, pnpm install, `docker compose up -d --build`).
