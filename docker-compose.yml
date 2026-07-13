@@ -1,0 +1,20 @@
+# pkos production services. Joins shared `web` network (see jepsn1/infra).
+name: pkos
+
+services:
+  ollama:
+    image: ollama/ollama:rocm
+    container_name: pkos-ollama
+    restart: unless-stopped
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    ports:
+      - "127.0.0.1:11434:11434"   # native dev access only
+    volumes:
+      - /srv/data/ollama:/root/.ollama
+    networks: [web]
+
+networks:
+  web:
+    external: true
