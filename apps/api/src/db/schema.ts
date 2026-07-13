@@ -53,6 +53,14 @@ export const conversations = pgTable('conversations', {
   title: text('title').notNull(),
   created: timestamp('created', { withTimezone: true }).notNull().defaultNow(),
   updated: timestamp('updated', { withTimezone: true }).notNull().defaultNow(),
+  /**
+   * Knowledge item this conversation was distilled into (null = plain history).
+   * set null on delete: rebuild-index wipes knowledge_items, then re-links via
+   * the item's `source: conversation:<id>` frontmatter (canonical provenance).
+   */
+  savedItemId: uuid('saved_item_id').references(() => knowledgeItems.id, {
+    onDelete: 'set null',
+  }),
 });
 
 export const messages = pgTable(

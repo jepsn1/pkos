@@ -1,6 +1,6 @@
 import { asc, desc, eq, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { conversations, messages, type Citation } from '../db/schema';
+import { conversations, knowledgeItems, messages, type Citation } from '../db/schema';
 
 export const CHAT_REPO = 'CHAT_REPO';
 
@@ -11,6 +11,13 @@ export interface Conversation {
   title: string;
   created: Date;
   updated: Date;
+  /** Knowledge item this conversation was saved as; null = plain history. */
+  savedItemId: string | null;
+}
+
+/** List row: saved status resolved to the vault path for display. */
+export interface ConversationListItem extends Conversation {
+  savedPath: string | null;
 }
 
 export interface Message {
@@ -28,9 +35,11 @@ export type NewMessage = Omit<Message, 'id' | 'created'>;
 export interface ChatRepo {
   createConversation(title: string): Promise<Conversation>;
   getConversation(id: string): Promise<Conversation | null>;
-  listConversations(): Promise<Conversation[]>;
+  listConversations(): Promise<ConversationListItem[]>;
   /** Bump `updated` so the list orders by recent activity. */
   touchConversation(id: string): Promise<void>;
+  /** Point the conversation at the knowledge item it was saved as. */
+  setSavedItem(conversationId: string, itemId: string): Promise<void>;
   addMessage(msg: NewMessage): Promise<Message>;
   /** Oldest first. */
   listMessages(conversationId: string): Promise<Message[]>;
@@ -52,8 +61,20 @@ export class DrizzleChatRepo implements ChatRepo {
     return row ?? null;
   }
 
-  async listConversations(): Promise<Conversation[]> {
-    return this.db.select().from(conversations).orderBy(desc(conversations.updated));
+  async listConversations(): Promise<ConversationListItem[]> {
+    const rows = await this.db
+      .select({
+        id: conversations.id,
+        title: conversations.title,
+        created: conversations.created,
+        updated: conversations.updated,
+        savedItemId: conversations.savedItemId,
+        savedPath: knowledgeItems.path,
+      })
+      .from(conversations)
+      .leftJoin(knowledgeItems, eq(conversations.savedItemId, knowledgeItems.id))
+      .orderBy(desc(conversations.updated));
+    return rows.map((r) => ({ ...r, savedPath: r.savedPath ?? null }));
   }
 
   async touchConversation(id: string): Promise<void> {
@@ -61,6 +82,13 @@ export class DrizzleChatRepo implements ChatRepo {
       .update(conversations)
       .set({ updated: sql`now()` })
       .where(eq(conversations.id, id));
+  }
+
+  async setSavedItem(conversationId: string, itemId: string): Promise<void> {
+    await this.db
+      .update(conversations)
+      .set({ savedItemId: itemId })
+      .where(eq(conversations.id, conversationId));
   }
 
   async addMessage(msg: NewMessage): Promise<Message> {

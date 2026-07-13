@@ -6,7 +6,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EmbeddingProvider } from '../knowledge/embedding.provider';
 import type { KnowledgeRepo, SearchHit } from '../knowledge/knowledge.repo';
 import { VaultService } from '../knowledge/vault.service';
-import type { ChatRepo, Conversation, Message, NewMessage } from './chat.repo';
+import type {
+  ChatRepo,
+  Conversation,
+  ConversationListItem,
+  Message,
+  NewMessage,
+} from './chat.repo';
 import { ChatService, deriveTitle } from './chat.service';
 import type { LlmMessage, LlmProvider } from './llm.provider';
 
@@ -28,7 +34,13 @@ class FakeChatRepo implements ChatRepo {
 
   async createConversation(title: string): Promise<Conversation> {
     const now = new Date();
-    const conv = { id: `conv-${++this.seq}`, title, created: now, updated: now };
+    const conv = {
+      id: `conv-${++this.seq}`,
+      title,
+      created: now,
+      updated: now,
+      savedItemId: null,
+    };
     this.conversations.push(conv);
     return conv;
   }
@@ -37,15 +49,20 @@ class FakeChatRepo implements ChatRepo {
     return this.conversations.find((c) => c.id === id) ?? null;
   }
 
-  async listConversations(): Promise<Conversation[]> {
-    return [...this.conversations].sort(
-      (a, b) => b.updated.getTime() - a.updated.getTime(),
-    );
+  async listConversations(): Promise<ConversationListItem[]> {
+    return [...this.conversations]
+      .sort((a, b) => b.updated.getTime() - a.updated.getTime())
+      .map((c) => ({ ...c, savedPath: null }));
   }
 
   async touchConversation(id: string): Promise<void> {
     const conv = this.conversations.find((c) => c.id === id);
     if (conv) conv.updated = new Date();
+  }
+
+  async setSavedItem(conversationId: string, itemId: string): Promise<void> {
+    const conv = this.conversations.find((c) => c.id === conversationId);
+    if (conv) conv.savedItemId = itemId;
   }
 
   async addMessage(msg: NewMessage): Promise<Message> {

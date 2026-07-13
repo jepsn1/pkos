@@ -24,6 +24,6 @@ const vaultPath = process.env.VAULT_PATH ?? '/srv/data/knowledge';
     // bind: undici's fetch throws "Illegal invocation" when called detached
     { provide: EMBED_FETCH, useValue: globalThis.fetch.bind(globalThis) },
   ],
-  exports: [EMBEDDING_PROVIDER, KNOWLEDGE_REPO, VaultService],
+  exports: [EMBEDDING_PROVIDER, KNOWLEDGE_REPO, VaultService, KnowledgeService],
 })
 export class KnowledgeModule {}
