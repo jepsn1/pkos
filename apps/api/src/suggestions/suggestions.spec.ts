@@ -84,8 +84,14 @@ class FakeSuggestionRepo implements SuggestionRepo {
     return this.rows.find((r) => r.id === id) ?? null;
   }
 
-  async listPendingByItem(itemId: string) {
-    return this.rows.filter((r) => r.itemId === itemId && r.status === 'pending');
+  async listByItem(itemId: string) {
+    // Simulate jsonb round-trip: key order is not preserved.
+    return this.rows
+      .filter((r) => r.itemId === itemId)
+      .map((r) => ({
+        ...r,
+        payload: Object.fromEntries(Object.entries(r.payload).reverse()),
+      }));
   }
 
   async resolve(id: string, status: 'accepted' | 'rejected') {
@@ -254,12 +260,17 @@ describe('SuggesterService.generate — duplicates & links (embedding bands)', (
     expect(ofKind('link')).toHaveLength(0);
   });
 
-  it('re-trigger does not duplicate identical pending suggestions', async () => {
+  it('re-trigger neither duplicates pendings nor re-nags resolved suggestions', async () => {
     repo.neighbors = [{ id: MERCY.id, path: MERCY.path, title: MERCY.title, score: 0.72 }];
     await suggester.generate(GRACE.id);
     const second = await suggester.generate(GRACE.id);
-
     expect(second).toHaveLength(0);
+    expect(ofKind('link')).toHaveLength(1);
+
+    // even after the user rejects it, the same suggestion never comes back
+    await service.reject(ofKind('link')[0].id);
+    const third = await suggester.generate(GRACE.id);
+    expect(third).toHaveLength(0);
     expect(ofKind('link')).toHaveLength(1);
   });
 });

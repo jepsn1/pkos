@@ -99,12 +99,13 @@ export class SuggesterService implements OnModuleInit {
       proposals.push({ kind: 'summary', payload: { summary: llm.summary } });
     }
 
-    // Re-triggering must not pile up identical pending suggestions.
-    const pending = await this.repo.listPendingByItem(itemId);
-    const seen = new Set(pending.map((s) => `${s.kind}:${JSON.stringify(s.payload)}`));
+    // Re-triggering must not pile up identical pendings or re-nag resolved ones.
+    // Canonical key: jsonb round-trips reorder payload keys.
+    const existing = await this.repo.listByItem(itemId);
+    const seen = new Set(existing.map((s) => dedupKey(s.kind, s.payload)));
     const created: Suggestion[] = [];
     for (const p of proposals) {
-      const key = `${p.kind}:${JSON.stringify(p.payload)}`;
+      const key = dedupKey(p.kind, p.payload);
       if (seen.has(key)) continue;
       seen.add(key);
       created.push(await this.repo.create(itemId, p.kind, p.payload));
@@ -178,6 +179,14 @@ export class SuggesterService implements OnModuleInit {
       '- summary: one sentence summarizing the new note.',
     ].join('\n');
   }
+}
+
+/** Key-order-independent identity of a suggestion (payloads are flat objects). */
+function dedupKey(kind: string, payload: Record<string, unknown>): string {
+  const sorted = Object.fromEntries(
+    Object.entries(payload).sort(([a], [b]) => a.localeCompare(b)),
+  );
+  return `${kind}:${JSON.stringify(sorted)}`;
 }
 
 /** Pull the outermost {...} out of an LLM reply (models love wrapping JSON in prose/fences). */

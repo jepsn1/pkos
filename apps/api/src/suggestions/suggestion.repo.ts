@@ -56,8 +56,8 @@ export interface SuggestionRepo {
   create(itemId: string, kind: SuggestionKind, payload: Record<string, unknown>): Promise<Suggestion>;
   list(status?: SuggestionStatus): Promise<SuggestionWithItem[]>;
   getById(id: string): Promise<Suggestion | null>;
-  /** Pending suggestions for one item (dedup guard for re-triggered generation). */
-  listPendingByItem(itemId: string): Promise<Suggestion[]>;
+  /** All suggestions for one item, any status (dedup guard for re-triggered generation). */
+  listByItem(itemId: string): Promise<Suggestion[]>;
   /** pending → status; null when the row is missing or already resolved. */
   resolve(id: string, status: 'accepted' | 'rejected'): Promise<Suggestion | null>;
   /** Cosine neighbors of an item using its stored embedding (item itself excluded). */
@@ -114,11 +114,11 @@ export class DrizzleSuggestionRepo implements SuggestionRepo {
     return row ?? null;
   }
 
-  async listPendingByItem(itemId: string): Promise<Suggestion[]> {
+  async listByItem(itemId: string): Promise<Suggestion[]> {
     return this.db
       .select(SUGGESTION_COLUMNS)
       .from(suggestions)
-      .where(and(eq(suggestions.itemId, itemId), eq(suggestions.status, 'pending')));
+      .where(eq(suggestions.itemId, itemId));
   }
 
   async resolve(id: string, status: 'accepted' | 'rejected'): Promise<Suggestion | null> {
