@@ -10,7 +10,14 @@ import type {
 import type { EmbeddingProvider } from '../knowledge/embedding.provider';
 import type { KnowledgeRepo, SearchHit } from '../knowledge/knowledge.repo';
 import { VaultService } from '../knowledge/vault.service';
-import type { ChatRepo, Conversation, Message, NewMessage } from './chat.repo';
+import type { GraphRetrieval } from '../graph/graph.retrieval';
+import type {
+  ChatRepo,
+  Conversation,
+  ConversationListItem,
+  Message,
+  NewMessage,
+} from './chat.repo';
 import { ChatService } from './chat.service';
 import type { LlmMessage, LlmProvider, LlmReply, LlmTool } from './llm.provider';
 
@@ -33,15 +40,25 @@ class FakeChatRepo implements ChatRepo {
 
   async createConversation(title: string): Promise<Conversation> {
     const now = new Date();
-    const conv = { id: `conv-${++this.seq}`, title, created: now, updated: now };
+    const conv = {
+      id: `conv-${++this.seq}`,
+      title,
+      created: now,
+      updated: now,
+      savedItemId: null,
+    };
     this.conversations.push(conv);
     return conv;
   }
   async getConversation(id: string): Promise<Conversation | null> {
     return this.conversations.find((c) => c.id === id) ?? null;
   }
-  async listConversations(): Promise<Conversation[]> {
-    return this.conversations;
+  async listConversations(): Promise<ConversationListItem[]> {
+    return this.conversations.map((c) => ({ ...c, savedPath: null }));
+  }
+  async setSavedItem(conversationId: string, itemId: string): Promise<void> {
+    const conv = this.conversations.find((c) => c.id === conversationId);
+    if (conv) conv.savedItemId = itemId;
   }
   async touchConversation(): Promise<void> {}
   async addMessage(msg: NewMessage): Promise<Message> {
@@ -127,12 +144,14 @@ beforeEach(() => {
 function makeService(hits: SearchHit[] = []): ChatService {
   const vault = new VaultService('/nonexistent-vault', async () => {});
   const fitness = new FitnessToolsService(fitnessRepo, () => new Date('2026-07-13T10:00:00Z'));
+  const noGraph: GraphRetrieval = { neighbors: async () => [] };
   return new ChatService(
     chatRepo,
     knowledgeRepoWith(hits),
     fakeEmbedder,
     llm,
     vault,
+    noGraph,
     fitness,
   );
 }

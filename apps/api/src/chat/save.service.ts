@@ -8,7 +8,7 @@ import {
 import { KNOWLEDGE_REPO, type KnowledgeRepo } from '../knowledge/knowledge.repo';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { CHAT_REPO, type ChatRepo, type Conversation, type Message } from './chat.repo';
-import { LLM_PROVIDER, stripThink, type LlmProvider } from './llm.provider';
+import { LLM_PROVIDER, stripThink, toReply, type LlmProvider } from './llm.provider';
 
 export interface SaveOptions {
   /** Vault folder for the article (default `conversations`). */
@@ -99,13 +99,15 @@ export class SaveService {
   ): Promise<Distilled> {
     const transcript = messages.map((m) => `${m.role}:\n${m.content}`).join('\n\n');
     const raw = stripThink(
-      await this.llm.chat([
-        { role: 'system', content: DISTILL_SYSTEM },
-        {
-          role: 'user',
-          content: `Conversation "${conversation.title}":\n\n${transcript}`,
-        },
-      ]),
+      toReply(
+        await this.llm.chat([
+          { role: 'system', content: DISTILL_SYSTEM },
+          {
+            role: 'user',
+            content: `Conversation "${conversation.title}":\n\n${transcript}`,
+          },
+        ]),
+      ).content,
     );
     return parseDistilled(raw);
   }
