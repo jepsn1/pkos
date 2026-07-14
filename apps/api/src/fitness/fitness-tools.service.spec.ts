@@ -5,6 +5,7 @@ import {
   normalizeMetricName,
   weekStart,
 } from './fitness-tools.service';
+import type { ExtractionService } from './extraction.service';
 import type {
   DatedSet,
   FitnessRepo,
@@ -174,6 +175,52 @@ describe('log_workout', () => {
       expect(res.error, JSON.stringify(args)).toBeDefined();
     }
     expect(repo.workouts).toHaveLength(1); // only the good one landed
+  });
+});
+
+describe('log_workout_text', () => {
+  it('dispatches raw_text verbatim + defaulted date to the extraction service', async () => {
+    const runs: Array<{ rawText: string; date: string }> = [];
+    const extraction = {
+      run: async (rawText: string, date: string) => {
+        runs.push({ rawText, date });
+        return { logged: true, workout_id: 'w-9', date, exercises: 2, sets: 6, skipped: [], notes: null };
+      },
+    } as unknown as ExtractionService;
+    const svc = new FitnessToolsService(repo, () => new Date(`${TODAY}T10:00:00Z`), extraction);
+
+    const res = JSON.parse(
+      await svc.execute({
+        name: 'log_workout_text',
+        arguments: { raw_text: 'Flys 24kg 3x8\n73kg 3x10 perfect form' },
+      }),
+    );
+    expect(runs).toEqual([{ rawText: 'Flys 24kg 3x8\n73kg 3x10 perfect form', date: TODAY }]);
+    expect(res).toMatchObject({ logged: true, exercises: 2, sets: 6 });
+
+    // explicit date passes through
+    await svc.execute({
+      name: 'log_workout_text',
+      arguments: { raw_text: 'x', date: '2026-07-10' },
+    });
+    expect(runs[1].date).toBe('2026-07-10');
+  });
+
+  it('requires raw_text; errors cleanly when extraction is not wired', async () => {
+    const extraction = { run: async () => ({}) } as unknown as ExtractionService;
+    const svc = new FitnessToolsService(repo, () => new Date(`${TODAY}T10:00:00Z`), extraction);
+    expect(
+      JSON.parse(await svc.execute({ name: 'log_workout_text', arguments: {} })).error,
+    ).toMatch(/raw_text/);
+    expect(
+      JSON.parse(
+        await svc.execute({ name: 'log_workout_text', arguments: { raw_text: 'x', date: 'nope' } }),
+      ).error,
+    ).toMatch(/date/);
+    // service (built without extraction in beforeEach) reports unavailability as {error}
+    expect(
+      (await run('log_workout_text', { raw_text: 'bench 5x5 80kg' })).error,
+    ).toMatch(/unavailable/);
   });
 });
 

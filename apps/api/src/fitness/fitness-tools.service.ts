@@ -1,5 +1,6 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { LlmTool, LlmToolCall } from '../chat/llm.provider';
+import { ExtractionService } from './extraction.service';
 import {
   FITNESS_REPO,
   type FitnessRepo,
@@ -13,14 +14,8 @@ export const FITNESS_NOW = 'FITNESS_NOW';
  *  Prefer FitnessToolsService.routingPrompt(), which prepends today's date. */
 export const FITNESS_ROUTING = `You also have tools for the user's personal training log and metric log. These routing rules take precedence over the knowledge-base instructions above.
 Routing rules:
-- When the user reports a workout, exercises, sets or reps, call log_workout. "AxB" means A separate sets of B reps each ("bench 5x5 at 80kg" = five set entries, each {reps: 5, weight_kg: 80}).
-- Real gym logs are messy — parse them faithfully, in any language, keeping the user's own exercise names:
-  * Sets are almost always 2-6; reps usually 5-20. "12x3" therefore means 3 sets of 12 reps; "3x12" also 3 sets of 12. Use judgment, don't log 12 sets unless clearly meant.
-  * Comma decimals are European: "10,5kg" = 10.5 kg; "124,6kg" = 124.6.
-  * A bare rep list "28kg, 12,10,9" = three sets (12, 10, 9 reps) at 28 kg.
-  * Entries with no weight (bodyweight or unknown machine) → sets with weight omitted.
-  * Lines that are not exercises (machine seat settings, "better form" remarks, questions like "increase?") → fold into the workout notes, do not invent sets for them.
-  * Log the ENTIRE session as ONE log_workout call.
+- When the user reports a long or messy real-world workout log — more than ~4 exercises, multiple lines, shorthand like "12x3", comma decimals, machine settings, form remarks — call log_workout_text with the user's workout text passed VERBATIM as raw_text. Copy their text EXACTLY as written: do NOT reformat, translate, summarize, or parse it yourself, and do NOT call log_workout for these. A dedicated server-side parser handles the messy details.
+- Only for a short, simple, unambiguous workout mention (~4 exercises or fewer, clean "AxB at Wkg" form) may you call log_workout directly. "AxB" means A separate sets of B reps each ("bench 5x5 at 80kg" = five set entries, each {reps: 5, weight_kg: 80}); weight omitted = bodyweight. Log the ENTIRE session as ONE call.
 - When the user states ANY personal numeric measurement — body weight, height, calories eaten, protein, sleep hours, resting heart rate, mood score, blood pressure, anything with a number — call log_metric. Reuse an existing metric name when one fits; bake the unit into the name (weight_kg, height_cm, sleep_hours, protein_g) or pass it as unit.
 - When the user asks anything about their own body or measurements — "what's my height", "how tall am I", "how much do I weigh", "how did I sleep", averages, trends, "what metrics do you have on me" — the answer IS in the metric log: ALWAYS call query_metric before answering (query=latest with the name; no name = every metric). NEVER say you lack access to their information without having called query_metric first. When the tool result is empty, say plainly that nothing is logged yet and offer to log it if they tell you — NEVER tell the user to "log in".
 - Broad questions about the user ("what do you know about me?", "tell me about myself") → call query_metric {query: latest} (no name) for their actual current values, then answer in prose combining those values with the knowledge items above. State values directly ("you're 180 cm tall"), not record metadata ("a metric was logged on...").
@@ -74,6 +69,26 @@ export const FITNESS_TOOLS: LlmTool[] = [
           },
         },
         notes: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'log_workout_text',
+    description:
+      'Log a long or messy workout from the user\'s raw text. Pass the workout text VERBATIM, exactly as the user wrote it (any language, any formatting) — a dedicated server-side parser extracts exercises and sets. Use this for any session with more than ~4 exercises or free-form/multiline logs.',
+    parameters: {
+      type: 'object',
+      required: ['raw_text'],
+      properties: {
+        raw_text: {
+          type: 'string',
+          description:
+            "The user's workout text EXACTLY as written, unmodified and complete.",
+        },
+        date: {
+          type: 'string',
+          description: 'Workout date YYYY-MM-DD. Omit for today.',
+        },
       },
     },
   },
@@ -152,6 +167,7 @@ export class FitnessToolsService {
   constructor(
     @Inject(FITNESS_REPO) private readonly repo: FitnessRepo,
     @Optional() @Inject(FITNESS_NOW) private readonly now: () => Date = () => new Date(),
+    @Optional() private readonly extraction?: ExtractionService,
   ) {}
 
   /** Run one tool call; result (or {error}) JSON-serialized for the tool message. */
@@ -161,6 +177,8 @@ export class FitnessToolsService {
       switch (call.name) {
         case 'log_workout':
           return JSON.stringify(await this.logWorkout(args));
+        case 'log_workout_text':
+          return JSON.stringify(await this.logWorkoutText(args));
         case 'log_metric':
           return JSON.stringify(await this.logMetric(args));
         case 'query_metric':
@@ -211,6 +229,16 @@ export class FitnessToolsService {
       exercises: exercises.map((e) => ({ exercise: e.exercise, sets: e.sets.length })),
       total_sets: workout.sets.length,
     };
+  }
+
+  /** Raw-text gym log → dedicated extraction LLM call → validated persist. */
+  async logWorkoutText(args: Args) {
+    const rawText = requiredString(args.raw_text, 'raw_text');
+    const date = this.parseDate(args.date, 'date');
+    if (!this.extraction) {
+      throw new ToolArgError('log_workout_text is unavailable (extraction service not wired)');
+    }
+    return this.extraction.run(rawText, date);
   }
 
   async logMetric(args: Args) {

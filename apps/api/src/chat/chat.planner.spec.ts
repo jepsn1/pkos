@@ -236,12 +236,16 @@ describe('ChatService planner (fitness tools)', () => {
     // routing: tools offered on the first call, routing text in the system prompt
     expect(llm.calls[0].tools?.map((t) => t.name)).toEqual([
       'log_workout',
+      'log_workout_text',
       'log_metric',
       'query_metric',
       'query_fitness',
     ]);
     expect(llm.calls[0].messages[0].content).toContain('log_workout');
     expect(llm.calls[0].messages[0].content).toContain("Today's date is 2026-07-13");
+    // messy/long gym logs route to log_workout_text with the text passed verbatim
+    expect(llm.calls[0].messages[0].content).toContain('log_workout_text');
+    expect(llm.calls[0].messages[0].content).toContain('VERBATIM');
 
     // the tool actually ran
     expect(fitnessRepo.workouts).toHaveLength(1);
@@ -391,6 +395,7 @@ describe('ChatService planner (knowledge tools)', () => {
     // both toolsets offered in one merged list
     expect(llm.calls[0].tools?.map((t) => t.name)).toEqual([
       'log_workout',
+      'log_workout_text',
       'log_metric',
       'query_metric',
       'query_fitness',
