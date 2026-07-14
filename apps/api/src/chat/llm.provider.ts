@@ -46,6 +46,7 @@ export interface LlmProvider {
     messages: LlmMessage[],
     tools: LlmTool[] | undefined,
     onToken: (token: string) => void,
+    onThinking?: (token: string) => void,
   ): Promise<LlmReply>;
 }
 
@@ -205,6 +206,7 @@ export class OllamaLlmProvider implements LlmProvider {
     messages: LlmMessage[],
     tools: LlmTool[] | undefined,
     onToken: (token: string) => void,
+    onThinking?: (token: string) => void,
   ): Promise<LlmReply> {
     const base = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
     const model = process.env.LLM_MODEL ?? 'qwen3:14b';
@@ -244,6 +246,10 @@ export class OllamaLlmProvider implements LlmProvider {
       for (const tc of obj.message?.tool_calls ?? []) {
         toolCalls.push({ name: tc.function?.name ?? '', arguments: tc.function?.arguments ?? {} });
       }
+      const thinkDelta = (obj.message as { thinking?: string } | undefined)?.thinking;
+      // Thinking streams even during tool rounds — it's the only sign of life
+      // while the model reasons over tool results (can be thousands of tokens).
+      if (typeof thinkDelta === 'string' && thinkDelta) onThinking?.(thinkDelta);
       const delta = typeof obj.message?.content === 'string' ? obj.message.content : '';
       if (delta) {
         content += delta;

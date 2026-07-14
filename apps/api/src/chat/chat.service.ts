@@ -133,6 +133,7 @@ export class ChatService {
     message: string,
     history: LlmMessage[] = [],
     onToken?: (token: string) => void,
+    onThinking?: (token: string) => void,
   ): Promise<{ answer: string; citations: Citation[] }> {
     const embedding = await this.embedder.embed(message);
     const minScore = Number(process.env.RETRIEVAL_MIN_SCORE ?? DEFAULT_MIN_SCORE);
@@ -172,7 +173,12 @@ export class ChatService {
         emitted += t;
         onToken!(t);
       });
-      const reply = await this.llm.chatStream!(llmMessages, tools, (tok) => filter.push(tok));
+      const reply = await this.llm.chatStream!(
+        llmMessages,
+        tools,
+        (tok) => filter.push(tok),
+        onThinking,
+      );
       filter.end();
       return reply;
     };

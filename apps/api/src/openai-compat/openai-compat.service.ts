@@ -116,13 +116,38 @@ export class OpenAiCompatService {
     ): CompletionChunk => ({ ...base, choices: [{ index: 0, delta, finish_reason: finish }] });
 
     send(chunk({ role: 'assistant', content: '' }));
+    // Reasoning models produce minutes of hidden thinking (incl. during tool
+    // rounds) before the first answer token. Stream it inside a <think> block —
+    // Open WebUI renders that as a live collapsible "Thinking…" section — and
+    // close the block when the real answer starts.
+    let thinkOpen = false;
+    const closeThink = () => {
+      if (thinkOpen) {
+        send(chunk({ content: '</think>' }));
+        thinkOpen = false;
+      }
+    };
     try {
-      const { citations } = await this.chat.answer(message, history, (token) =>
-        send(chunk({ content: token })),
+      const { citations } = await this.chat.answer(
+        message,
+        history,
+        (token) => {
+          closeThink();
+          send(chunk({ content: token }));
+        },
+        (thought) => {
+          if (!thinkOpen) {
+            send(chunk({ content: '<think>' }));
+            thinkOpen = true;
+          }
+          send(chunk({ content: thought }));
+        },
       );
+      closeThink();
       const footer = sourcesFooter(citations);
       if (footer) send(chunk({ content: footer }));
     } catch (err) {
+      closeThink();
       send(chunk({ content: `\n\n[pkos error: ${err instanceof Error ? err.message : err}]` }));
     }
     send(chunk({}, 'stop'));
