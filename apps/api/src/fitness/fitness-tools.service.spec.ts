@@ -159,6 +159,33 @@ describe('log_body_metric', () => {
   });
 });
 
+describe('query_fitness latest_metrics', () => {
+  it('returns most recent non-null value + date per metric', async () => {
+    repo.metrics.push(
+      { id: 'm1', date: '2026-07-10', weightKg: 84, calories: 2400, proteinG: null },
+      { id: 'm2', date: '2026-07-12', weightKg: 83, calories: null, proteinG: 160 },
+      { id: 'm3', date: '2026-07-13', weightKg: null, calories: null, proteinG: 150 },
+    );
+    const res = await run('query_fitness', { query: 'latest_metrics' });
+    expect(res).toEqual({
+      query: 'latest_metrics',
+      weight_kg: { value: 83, date: '2026-07-12' },
+      calories: { value: 2400, date: '2026-07-10' },
+      protein_g: { value: 150, date: '2026-07-13' },
+    });
+  });
+
+  it('all-null shape when nothing logged', async () => {
+    const res = await run('query_fitness', { query: 'latest_metrics' });
+    expect(res).toEqual({
+      query: 'latest_metrics',
+      weight_kg: null,
+      calories: null,
+      protein_g: null,
+    });
+  });
+});
+
 describe('query_fitness metric_avg', () => {
   beforeEach(async () => {
     for (const [date, protein_g] of [

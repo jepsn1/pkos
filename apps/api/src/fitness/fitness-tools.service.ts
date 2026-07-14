@@ -15,7 +15,7 @@ export const FITNESS_ROUTING = `You also have fitness tools for the user's perso
 Routing rules:
 - When the user reports a workout, exercises, sets or reps, call log_workout. "AxB" means A separate sets of B reps each ("bench 5x5 at 80kg" = five set entries, each {reps: 5, weight_kg: 80}).
 - When the user reports body weight, calories eaten, or protein eaten, call log_body_metric.
-- When the user asks about their training or nutrition data (averages, progression, weekly volume, recent workouts), call query_fitness and answer strictly from the tool result.
+- When the user asks about their training or nutrition data (current/latest weight or metrics, averages, progression, weekly volume, recent workouts), call query_fitness and answer strictly from the tool result.
 - For every other question — notes, knowledge, theology, general topics — do NOT call fitness tools; answer from the knowledge items above as instructed.
 After a logging tool succeeds, confirm briefly what was saved. Numbers in answers must come from tool results, never invented.`;
 
@@ -23,6 +23,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const METRICS = ['weight_kg', 'calories', 'protein_g'] as const;
 type MetricName = (typeof METRICS)[number];
 const QUERIES = [
+  'latest_metrics',
   'metric_avg',
   'exercise_progression',
   'weekly_volume',
@@ -89,7 +90,7 @@ export const FITNESS_TOOLS: LlmTool[] = [
   {
     name: 'query_fitness',
     description:
-      'Query the training log. query=metric_avg: average of a body metric (weight_kg | calories | protein_g) between since and until. query=exercise_progression: per-workout top weight/reps/volume for one exercise. query=weekly_volume: training volume per week since a date. query=recent_workouts: latest workouts with sets.',
+      'Query the training log. query=latest_metrics: most recent recorded value + date per body metric — use for "current weight" etc. query=metric_avg: average of a body metric (weight_kg | calories | protein_g) between since and until. query=exercise_progression: per-workout top weight/reps/volume for one exercise. query=weekly_volume: training volume per week since a date. query=recent_workouts: latest workouts with sets.',
     parameters: {
       type: 'object',
       required: ['query'],
@@ -209,6 +210,8 @@ export class FitnessToolsService {
   async queryFitness(args: Args) {
     const query = requiredString(args.query, 'query');
     switch (query) {
+      case 'latest_metrics':
+        return this.latestMetrics();
       case 'metric_avg':
         return this.metricAvg(args);
       case 'exercise_progression':
@@ -220,6 +223,21 @@ export class FitnessToolsService {
       default:
         throw new ToolArgError(`query must be one of: ${QUERIES.join(', ')}`);
     }
+  }
+
+  /** Most recent non-null value per metric (rows come back date-desc). */
+  private async latestMetrics() {
+    const rows = await this.repo.listMetrics();
+    const latest = (key: 'weightKg' | 'calories' | 'proteinG') => {
+      const row = rows.find((r) => r[key] !== null);
+      return row ? { value: row[key], date: row.date } : null;
+    };
+    return {
+      query: 'latest_metrics',
+      weight_kg: latest('weightKg'),
+      calories: latest('calories'),
+      protein_g: latest('proteinG'),
+    };
   }
 
   private async metricAvg(args: Args) {
