@@ -86,6 +86,14 @@ pnpm 11 monorepo (mirrors biblestdy): `apps/api` (NestJS + Drizzle + Vitest, pre
 - REST fallback (prefix `/api`): `GET /fitness/workouts` (recent 50 w/ sets), `GET /fitness/metrics` (date desc).
 - `LLM_TIMEOUT_MS` env overrides the 120s ollama timeout (tool loops = several LLM round trips; shared ollama queues).
 
+## AI organization suggestions (slice 12, issue #12)
+
+- On ingest (`POST /knowledge` and conversation saves), `KnowledgeService.onIngested` fires `SuggesterService.generate` fire-and-forget — ingest response unchanged, suggester errors only logged, ingest NEVER fails on suggester failure. Manual re-trigger: `POST /knowledge/:id/suggest` (dedup: identical or previously resolved suggestions are not re-created; jsonb-safe canonical payload key; ≤1 open summary suggestion per item).
+- Generation per new item: cosine neighbors from stored embeddings — score ≥0.9 → `duplicate` `{duplicateOfPath, similarity}`; 0.65–0.9 (and not already linked in frontmatter) → `link` `{toPath, type}` (`related_to` unless qwen3 proposes a valid better type); one qwen3:14b JSON call proposes ≤5 lowercase `tag`s (existing vault-wide tag vocabulary in the prompt, item's own tags excluded) + a `summary` when the note has none. LLM failure drops tags/summary but keeps the embedding-derived suggestions.
+- Everything stored `pending` in `suggestions` (item_id FK cascade, kind/status pg enums, payload jsonb) — **never auto-applied, the user decides** (PRD). Rows are ephemeral review state: rebuild-index's knowledge_items wipe cascades them away; accepted effects already live in the vault.
+- Review API (prefix `/api`): `GET /suggestions?status=pending|accepted|rejected` (rows joined w/ item path/title), `POST /suggestions/:id/accept`, `POST /suggestions/:id/reject` (404 unknown, 409 already resolved). Accept applies via canonical paths: tag/summary → frontmatter rewrite + vault commit (VaultService) + row update (summary also re-embeds); link → GraphService.createEdge (frontmatter + row; pre-existing edge = no-op); duplicate → informational only, marks accepted, no merge/delete. Reject only marks.
+- Module: `src/suggestions/` (own repo + LLM provider instance); seams elsewhere: `suggestions` table in schema.ts (append-only), `KnowledgeService.onIngested` observer, one AppModule import.
+
 ## Prod (docker)
 
 - Deploy: `make deploy` in `/srv/apps/pkos` (git pull, pnpm install, `docker compose up -d --build`).
