@@ -28,6 +28,10 @@ export interface IngestRequest {
   importance?: number;
   /** Vault folder, e.g. faith/reflections. */
   folder?: string;
+  /** Explicit file name (no .md) — overrides the title slug. */
+  filename?: string;
+  /** Frontmatter created date (YYYY-MM-DD); defaults to today. */
+  created?: string;
 }
 
 const DEFAULT_FOLDER = 'articles';
@@ -54,11 +58,15 @@ export class KnowledgeService {
         tags: req.tags ?? [],
         summary: req.summary,
         importance: req.importance,
-        created: new Date().toISOString().slice(0, 10),
+        created: req.created ?? new Date().toISOString().slice(0, 10),
       },
       body: req.markdown,
     };
-    const relPath = await this.vault.writeNote(req.folder ?? DEFAULT_FOLDER, note);
+    const relPath = await this.vault.writeNote(
+      req.folder ?? DEFAULT_FOLDER,
+      note,
+      req.filename,
+    );
     return this.index(relPath, note);
   }
 

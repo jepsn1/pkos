@@ -3,43 +3,8 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type {
-  SermonJob,
-  SermonJobStatus,
-  SermonRepo,
-} from './sermons.repo';
+import { FakeSermonRepo } from './fake-sermon-repo';
 import { SermonsService } from './sermons.service';
-
-/** In-memory job store mirroring db defaults (status queued). */
-class FakeSermonRepo implements SermonRepo {
-  rows: SermonJob[] = [];
-  private seq = 0;
-
-  async create(originalFilename: string, audioPath: string): Promise<SermonJob> {
-    const row: SermonJob = {
-      id: `job-${++this.seq}`,
-      status: 'queued' as SermonJobStatus,
-      originalFilename,
-      audioPath,
-      error: null,
-      transcript: null,
-      created: new Date(),
-      updated: new Date(),
-    };
-    this.rows.push(row);
-    return row;
-  }
-
-  async list() {
-    return [...this.rows]
-      .sort((a, b) => b.created.getTime() - a.created.getTime())
-      .map(({ transcript, ...rest }) => rest);
-  }
-
-  async getById(id: string) {
-    return this.rows.find((r) => r.id === id) ?? null;
-  }
-}
 
 let uploads: string;
 let repo: FakeSermonRepo;
@@ -105,6 +70,31 @@ describe('SermonsService.upload', () => {
     const a = await service.upload(audio('same.mp3'));
     const b = await service.upload(audio('same.mp3'));
     expect(a.audioPath).not.toBe(b.audioPath);
+  });
+
+  it('stores optional speaker/date/title metadata, trimmed', async () => {
+    const job = await service.upload(audio('a.mp3'), {
+      speaker: '  John Piper ',
+      date: '2026-07-12',
+      title: ' The Gospel of John ',
+    });
+    expect(job.speaker).toBe('John Piper');
+    expect(job.sermonDate).toBe('2026-07-12');
+    expect(job.title).toBe('The Gospel of John');
+  });
+
+  it('defaults metadata to null when absent or blank', async () => {
+    const job = await service.upload(audio('a.mp3'), { speaker: '  ' });
+    expect(job.speaker).toBeNull();
+    expect(job.sermonDate).toBeNull();
+    expect(job.title).toBeNull();
+  });
+
+  it('400s on a malformed date', async () => {
+    await expect(
+      service.upload(audio('a.mp3'), { date: '12/07/2026' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(repo.rows).toHaveLength(0);
   });
 });
 

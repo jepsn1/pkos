@@ -31,6 +31,15 @@ export function realGitRunner(vaultPath: string): GitRunner {
 
 const ALLOWED_FOLDER = /^[a-z0-9][a-z0-9/_-]*$/;
 
+/** Keep explicit filenames human-readable but path- and shell-safe. */
+export function sanitizeFileName(name: string): string {
+  return name
+    .replace(/[\/\\:*?"<>|\u0000-\u001f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^\.+/, '');
+}
+
 /**
  * The canonical markdown vault (git checkout of jepsn1/knowledge).
  * Owns file layout + git commits; everything else treats notes as data.
@@ -42,18 +51,22 @@ export class VaultService {
     @Inject(GIT) private readonly git: GitRunner,
   ) {}
 
-  /** Write a note under `folder`, commit it, return the vault-relative path. */
-  async writeNote(folder: string, note: Note): Promise<string> {
+  /**
+   * Write a note under `folder`, commit it, return the vault-relative path.
+   * `fileName` (no extension) overrides the default title slug — e.g. sermon
+   * articles keep human-readable "YYYY-MM-DD Title - Speaker" names.
+   */
+  async writeNote(folder: string, note: Note, fileName?: string): Promise<string> {
     if (!ALLOWED_FOLDER.test(folder) || folder.includes('..')) {
       throw new BadRequestException(`invalid folder: ${folder}`);
     }
     const dir = path.join(this.root, folder);
     await fs.mkdir(dir, { recursive: true });
 
-    const slug = slugify(note.meta.title);
-    let relPath = path.posix.join(folder, `${slug}.md`);
+    const base = (fileName && sanitizeFileName(fileName)) || slugify(note.meta.title);
+    let relPath = path.posix.join(folder, `${base}.md`);
     for (let n = 2; await this.exists(relPath); n++) {
-      relPath = path.posix.join(folder, `${slug}-${n}.md`);
+      relPath = path.posix.join(folder, `${base}-${n}.md`);
     }
 
     await fs.writeFile(path.join(this.root, relPath), serializeNote(note), 'utf8');

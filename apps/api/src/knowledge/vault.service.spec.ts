@@ -70,6 +70,23 @@ describe('VaultService', () => {
     expect(Object.keys(data).sort()).toEqual(['created', 'tags', 'title']);
   });
 
+  it('honors an explicit human-readable filename, sanitized and suffixed on collision', async () => {
+    const v = vault();
+    expect(
+      await v.writeNote('faith/sermons', note, '2026-07-12 On Grace - John Piper'),
+    ).toBe('faith/sermons/2026-07-12 On Grace - John Piper.md');
+    expect(
+      await v.writeNote('faith/sermons', note, '2026-07-12 On Grace - John Piper'),
+    ).toBe('faith/sermons/2026-07-12 On Grace - John Piper-2.md');
+    // path/shell-hostile chars stripped; empty result falls back to the title slug
+    expect(await v.writeNote('faith/sermons', note, 'a/b\\c: d?')).toBe(
+      'faith/sermons/a b c d.md',
+    );
+    expect(await v.writeNote('faith/sermons', note, '///')).toBe(
+      'faith/sermons/on-grace.md',
+    );
+  });
+
   it('suffixes the filename when the slug already exists', async () => {
     const v = vault();
     expect(await v.writeNote('faith/reflections', note)).toBe(

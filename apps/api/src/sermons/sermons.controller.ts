@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
@@ -7,6 +8,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { SermonMeta } from './sermons.repo';
 import { SermonsService, type UploadedAudio } from './sermons.service';
 
 /** Sermon audio can be long; whole-file buffer capped here. */
@@ -20,8 +22,9 @@ export class SermonsController {
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: MAX_UPLOAD_BYTES } }),
   )
-  async upload(@UploadedFile() file?: UploadedAudio) {
-    return this.sermons.upload(file);
+  async upload(@UploadedFile() file?: UploadedAudio, @Body() meta?: SermonMeta) {
+    // multipart text fields (speaker/date/title) arrive on the body
+    return this.sermons.upload(file, meta ?? {});
   }
 
   @Get()

@@ -29,6 +29,19 @@ async function main() {
   console.log(
     `rebuild-index: ${indexed} notes indexed from vault, ${relinked.rowCount ?? 0} conversations re-linked`,
   );
+  // Same for sermon articles: restore sermon_jobs.article_item_id from
+  // `source: sermon:<jobId>` frontmatter (article_path is primary, survives).
+  const sermonsRelinked = await db.execute(sql`
+    UPDATE sermon_jobs s SET article_item_id = k.id
+    FROM (
+      SELECT DISTINCT ON (source) source, id
+      FROM knowledge_items
+      WHERE source LIKE 'sermon:%'
+      ORDER BY source, created DESC, updated DESC, path DESC
+    ) k
+    WHERE k.source = 'sermon:' || s.id
+  `);
+  console.log(`rebuild-index: ${sermonsRelinked.rowCount ?? 0} sermon articles re-linked`);
   // Second pass: knowledge_items wipe cascaded relationships away; restore from frontmatter.
   const { restored, skipped } = await app.get(GraphService).restoreFromVault();
   console.log(`rebuild-index: ${restored} relationships restored from frontmatter`);

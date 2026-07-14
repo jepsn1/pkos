@@ -23,6 +23,6 @@ const uploadsPath =
     { provide: SERMON_REPO, useValue: new DrizzleSermonRepo(db) },
     { provide: TRANSCRIPT_SEARCH, useValue: new DrizzleTranscriptSearch(db) },
   ],
-  exports: [TRANSCRIPT_SEARCH],
+  exports: [TRANSCRIPT_SEARCH, SERMON_REPO],
 })
 export class SermonsModule {}

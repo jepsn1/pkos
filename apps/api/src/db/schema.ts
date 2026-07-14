@@ -130,10 +130,20 @@ export const messages = pgTable(
 
 // Sermon transcription jobs (slice 7, issue #7). PRIMARY data: audio lives on
 // disk under UPLOADS_PATH; transcript + chunks exist only here.
+// Enrichment (issue #8): worker sets `done`; api-side poller takes done →
+// enriching → enriched (vault article created) or enrich_error (retryable).
 export const sermonJobs = pgTable('sermon_jobs', {
   id: uuid('id').defaultRandom().primaryKey(),
   status: text('status', {
-    enum: ['queued', 'processing', 'done', 'error'],
+    enum: [
+      'queued',
+      'processing',
+      'done',
+      'error',
+      'enriching',
+      'enriched',
+      'enrich_error',
+    ],
   })
     .notNull()
     .default('queued'),
@@ -145,6 +155,22 @@ export const sermonJobs = pgTable('sermon_jobs', {
   error: text('error'),
   /** Full transcript, set when status = done. */
   transcript: text('transcript'),
+  /** Upload metadata (optional): who preached, when, and a preferred title. */
+  speaker: text('speaker'),
+  sermonDate: date('sermon_date'),
+  title: text('title'),
+  /**
+   * Vault article distilled from the transcript (null = not enriched yet).
+   * set null on delete: rebuild-index wipes knowledge_items, then re-links via
+   * the item's `source: sermon:<jobId>` frontmatter (canonical provenance).
+   */
+  articleItemId: uuid('article_item_id').references(() => knowledgeItems.id, {
+    onDelete: 'set null',
+  }),
+  /** Vault-relative article path, denormalized for cheap job views. */
+  articlePath: text('article_path'),
+  /** Set when status = enrich_error; cleared on successful (re)enrichment. */
+  enrichError: text('enrich_error'),
   created: timestamp('created', { withTimezone: true }).notNull().defaultNow(),
   updated: timestamp('updated', { withTimezone: true }).notNull().defaultNow(),
 });
