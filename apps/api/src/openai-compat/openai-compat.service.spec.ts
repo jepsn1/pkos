@@ -8,6 +8,7 @@ import {
   OpenAiCompatService,
   parseMessages,
   withSources,
+  type CompletionChunk,
 } from './openai-compat.service';
 
 const GRACE_CITATION: Citation = {
@@ -16,12 +17,21 @@ const GRACE_CITATION: Citation = {
   score: 0.72,
 };
 
-/** Records answer() calls; returns a fixed grounded answer. */
-function serviceWith(citations: Citation[], answer = 'Grace is unmerited favor.') {
+/** Records answer() calls; streams `tokens` through onToken; returns a grounded answer. */
+function serviceWith(
+  citations: Citation[],
+  answer = 'Grace is unmerited favor.',
+  tokens: string[] = [answer],
+) {
   const calls: Array<{ message: string; history: LlmMessage[] }> = [];
   const chat = {
-    answer: async (message: string, history: LlmMessage[]) => {
+    answer: async (
+      message: string,
+      history: LlmMessage[],
+      onToken?: (token: string) => void,
+    ) => {
       calls.push({ message, history });
+      if (onToken) for (const t of tokens) onToken(t);
       return { answer, citations };
     },
   } as unknown as ChatService;
@@ -120,19 +130,67 @@ describe('withSources', () => {
   });
 });
 
-describe('completeChunks (stream translation)', () => {
-  it('emits role chunk, content chunk with footer, stop chunk', async () => {
-    const { service } = serviceWith([GRACE_CITATION]);
-    const chunks = await service.completeChunks({
-      messages: [{ role: 'user', content: 'grace?' }],
-    });
+describe('streamCompletion (real token streaming)', () => {
+  async function collect(service: OpenAiCompatService, body = {
+    messages: [{ role: 'user', content: 'grace?' }],
+  }) {
+    const chunks: CompletionChunk[] = [];
+    await service.streamCompletion(body, (c) => chunks.push(c));
+    return chunks;
+  }
 
-    expect(chunks).toHaveLength(3);
+  it('emits role chunk → one delta per token → sources footer delta → stop', async () => {
+    const { service } = serviceWith(
+      [GRACE_CITATION],
+      'Grace is unmerited favor.',
+      ['Grace', ' is', ' unmerited', ' favor.'],
+    );
+    const chunks = await collect(service);
+
     expect(chunks.every((c) => c.object === 'chat.completion.chunk')).toBe(true);
     expect(chunks.every((c) => c.id === chunks[0].id)).toBe(true);
     expect(chunks[0].choices[0].delta.role).toBe('assistant');
-    expect(chunks[1].choices[0].delta.content).toContain('Grace is unmerited favor.');
-    expect(chunks[1].choices[0].delta.content).toContain('**Sources:**');
+    const deltas = chunks.slice(1, -1).map((c) => c.choices[0].delta.content);
+    expect(deltas).toEqual([
+      'Grace',
+      ' is',
+      ' unmerited',
+      ' favor.',
+      '\n\n---\n**Sources:**\n- `faith/reflections/on-grace.md` — On Grace (0.72)',
+    ]);
+    // everything before the stop chunk is finish_reason:null
+    expect(chunks.slice(0, -1).every((c) => c.choices[0].finish_reason === null)).toBe(true);
+    const stop = chunks.at(-1)!;
+    expect(stop.choices[0].finish_reason).toBe('stop');
+    expect(stop.choices[0].delta).toEqual({});
+  });
+
+  it('omits the footer delta when there are no citations', async () => {
+    const { service } = serviceWith([], 'Nothing relevant.', ['Nothing', ' relevant.']);
+    const chunks = await collect(service);
+    expect(chunks.map((c) => c.choices[0].delta.content)).toEqual([
+      '',
+      'Nothing',
+      ' relevant.',
+      undefined,
+    ]);
+  });
+
+  it('turns a mid-stream failure into an error delta followed by the stop chunk', async () => {
+    const chat = {
+      answer: async () => {
+        throw new Error('ollama down');
+      },
+    } as unknown as ChatService;
+    const service = new OpenAiCompatService(chat);
+    const chunks: CompletionChunk[] = [];
+    await service.streamCompletion(
+      { messages: [{ role: 'user', content: 'grace?' }] },
+      (c) => chunks.push(c),
+    );
+
+    expect(chunks).toHaveLength(3); // role, error delta, stop — never hangs
+    expect(chunks[1].choices[0].delta.content).toContain('[pkos error: ollama down]');
     expect(chunks[2].choices[0].finish_reason).toBe('stop');
   });
 });

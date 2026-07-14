@@ -92,38 +92,55 @@ export class OpenAiCompatService {
   }
 
   /**
-   * `stream: true` variant. The underlying LLM call is non-streaming, so this
-   * emits the finished answer as a single SSE content chunk — spec-shaped enough
-   * for OpenAI clients, no partial-token plumbing.
+   * `stream: true` variant — REAL token streaming. Emits, in order: a role
+   * chunk, one content delta per LLM token as it arrives (ChatService keeps
+   * tool rounds silent), the Sources footer as its own final content delta,
+   * then a finish_reason:stop chunk. Errors after the stream has opened become
+   * an error content delta (still followed by the stop chunk) so clients
+   * terminate cleanly instead of hanging.
    */
-  async completeChunks(body: CompletionRequest): Promise<CompletionChunk[]> {
-    const full = await this.complete(body);
+  async streamCompletion(
+    body: CompletionRequest,
+    send: (chunk: CompletionChunk) => void,
+  ): Promise<void> {
+    const { message, history } = parseMessages(body);
     const base = {
-      id: full.id,
+      id: `chatcmpl-${randomUUID()}`,
       object: 'chat.completion.chunk' as const,
-      created: full.created,
+      created: Math.floor(Date.now() / 1000),
       model: MODEL_ID,
     };
-    return [
-      { ...base, choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] },
-      {
-        ...base,
-        choices: [
-          { index: 0, delta: { content: full.choices[0].message.content }, finish_reason: null },
-        ],
-      },
-      { ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
-    ];
+    const chunk = (
+      delta: CompletionChunk['choices'][0]['delta'],
+      finish: 'stop' | null = null,
+    ): CompletionChunk => ({ ...base, choices: [{ index: 0, delta, finish_reason: finish }] });
+
+    send(chunk({ role: 'assistant', content: '' }));
+    try {
+      const { citations } = await this.chat.answer(message, history, (token) =>
+        send(chunk({ content: token })),
+      );
+      const footer = sourcesFooter(citations);
+      if (footer) send(chunk({ content: footer }));
+    } catch (err) {
+      send(chunk({ content: `\n\n[pkos error: ${err instanceof Error ? err.message : err}]` }));
+    }
+    send(chunk({}, 'stop'));
   }
 }
 
 /** Markdown "Sources:" footer so citations survive any OpenAI-speaking client. */
 export function withSources(answer: string, citations: Citation[]): string {
-  if (citations.length === 0) return answer;
+  return `${answer}${sourcesFooter(citations)}`;
+}
+
+/** The footer alone ('' when no citations) — streamed as its own delta. */
+export function sourcesFooter(citations: Citation[]): string {
+  if (citations.length === 0) return '';
   const lines = citations.map(
     (c) => `- \`${c.path}\` — ${c.title} (${c.score !== undefined ? c.score.toFixed(2) : `via graph: ${c.relation}`})`,
   );
-  return `${answer}\n\n---\n**Sources:**\n${lines.join('\n')}`;
+  return `\n\n---\n**Sources:**\n${lines.join('\n')}`;
 }
 
 /**

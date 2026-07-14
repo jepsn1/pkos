@@ -19,9 +19,11 @@ import {
 import {
   LLM_PROVIDER,
   stripThink,
+  ThinkFilter,
   toReply,
   type LlmMessage,
   type LlmProvider,
+  type LlmReply,
 } from './llm.provider';
 
 export interface ChatResult {
@@ -100,10 +102,17 @@ export class ChatService {
    * `history` is replayed to the LLM but nothing is persisted — callers that own
    * their own conversation state (e.g. the OpenAI-compat surface, where the client
    * resends full history every turn) use this directly.
+   *
+   * `onToken` (optional) streams the natural-language answer as it is generated:
+   * tokens are think-filtered on the fly, tool rounds stay silent (the loop runs,
+   * results are fed back, nothing is emitted until the model answers in prose),
+   * and the returned/persisted `answer` equals the concatenation of the emitted
+   * tokens. Without `onToken` behavior is exactly as before.
    */
   async answer(
     message: string,
     history: LlmMessage[] = [],
+    onToken?: (token: string) => void,
   ): Promise<{ answer: string; citations: Citation[] }> {
     const embedding = await this.embedder.embed(message);
     const minScore = Number(process.env.RETRIEVAL_MIN_SCORE ?? DEFAULT_MIN_SCORE);
@@ -131,7 +140,22 @@ export class ChatService {
     // Planner: fitness tools are offered on every turn; the system prompt routes
     // fitness statements/questions to them, everything else stays on retrieval.
     const tools = this.fitness?.tools;
-    let reply = toReply(await this.llm.chat(llmMessages, tools));
+    // Streaming: one think-filter per LLM round, all filters share the emitted
+    // accumulator — in practice tool rounds emit nothing (the provider silences
+    // content once a tool_call appears), so `emitted` = the final prose round.
+    const streaming = onToken && this.llm.chatStream;
+    let emitted = '';
+    const callLlm = async (): Promise<LlmReply> => {
+      if (!streaming) return toReply(await this.llm.chat(llmMessages, tools));
+      const filter = new ThinkFilter((t) => {
+        emitted += t;
+        onToken!(t);
+      });
+      const reply = await this.llm.chatStream!(llmMessages, tools, (tok) => filter.push(tok));
+      filter.end();
+      return reply;
+    };
+    let reply = await callLlm();
     for (
       let round = 0;
       this.fitness && reply.toolCalls.length > 0 && round < MAX_TOOL_ROUNDS;
@@ -149,9 +173,16 @@ export class ChatService {
           toolName: call.name,
         });
       }
-      reply = toReply(await this.llm.chat(llmMessages, tools));
+      reply = await callLlm();
     }
-    const answer = stripThink(reply.content);
+    let answer: string;
+    if (streaming) {
+      answer = emitted;
+    } else {
+      answer = stripThink(reply.content);
+      // Degraded streaming: provider without chatStream → whole answer as one token.
+      if (onToken && answer) onToken(answer);
+    }
     return { answer, citations };
   }
 

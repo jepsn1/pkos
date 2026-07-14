@@ -35,6 +35,18 @@ export interface LlmReply {
  *  it is an LlmReply that may carry tool calls. */
 export interface LlmProvider {
   chat(messages: LlmMessage[], tools?: LlmTool[]): Promise<string | LlmReply>;
+  /**
+   * Streaming variant: `onToken` receives content deltas as they arrive; the
+   * resolved LlmReply is the assembled final reply (content + tool_calls).
+   * Once a tool_call appears in the stream, later content deltas are NOT
+   * forwarded to `onToken` (tool rounds stay silent) but still land in
+   * `reply.content`. Optional so simple test fakes stay valid.
+   */
+  chatStream?(
+    messages: LlmMessage[],
+    tools: LlmTool[] | undefined,
+    onToken: (token: string) => void,
+  ): Promise<LlmReply>;
 }
 
 /** Normalize either reply shape to an LlmReply. */
@@ -49,6 +61,91 @@ const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS ?? 120_000);
 /** Remove qwen3 <think>…</think> blocks (belt and braces on top of think:false). */
 export function stripThink(text: string): string {
   return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+}
+
+const THINK_OPEN = '<think>';
+const THINK_CLOSE = '</think>';
+
+/** Longest suffix of `text` that is a proper prefix of `tag` (partial tag holdback). */
+function partialTagSuffix(text: string, tag: string): number {
+  const max = Math.min(text.length, tag.length - 1);
+  for (let len = max; len > 0; len--) {
+    if (text.endsWith(tag.slice(0, len))) return len;
+  }
+  return 0;
+}
+
+/**
+ * Streaming counterpart of stripThink: push token deltas in, get filtered
+ * deltas out. Suppresses <think>…</think> spans (tags may split across
+ * deltas) and trims leading/trailing whitespace on the fly, so the
+ * concatenation of emitted deltas === stripThink(concatenation of inputs)
+ * for any closed-think input. `end()` flushes holdback and returns the
+ * full emitted text.
+ */
+export class ThinkFilter {
+  private buf = '';
+  private inThink = false;
+  private emittedAny = false;
+  private pendingWs = '';
+  private total = '';
+
+  constructor(private readonly sink: (token: string) => void) {}
+
+  push(delta: string): void {
+    this.buf += delta;
+    for (;;) {
+      if (this.inThink) {
+        const close = this.buf.indexOf(THINK_CLOSE);
+        if (close === -1) {
+          // keep only what could still be a partial closing tag
+          this.buf = this.buf.slice(this.buf.length - partialTagSuffix(this.buf, THINK_CLOSE));
+          return;
+        }
+        this.buf = this.buf.slice(close + THINK_CLOSE.length);
+        this.inThink = false;
+        continue;
+      }
+      const open = this.buf.indexOf(THINK_OPEN);
+      if (open === -1) {
+        const hold = partialTagSuffix(this.buf, THINK_OPEN);
+        this.emit(this.buf.slice(0, this.buf.length - hold));
+        this.buf = this.buf.slice(this.buf.length - hold);
+        return;
+      }
+      this.emit(this.buf.slice(0, open));
+      this.buf = this.buf.slice(open + THINK_OPEN.length);
+      this.inThink = true;
+    }
+  }
+
+  /** Flush non-think holdback (a lone "<thi" that never became a tag is real text). */
+  end(): string {
+    if (!this.inThink && this.buf) {
+      this.emit(this.buf);
+      this.buf = '';
+    }
+    return this.total;
+  }
+
+  /** Whitespace-aware emit: drops leading ws, holds trailing ws until more text follows. */
+  private emit(text: string): void {
+    if (!text) return;
+    if (!this.emittedAny) {
+      this.pendingWs = ''; // pre-first-text whitespace = leading, drop it
+      text = text.replace(/^\s+/, '');
+      if (!text) return;
+    }
+    const combined = this.pendingWs + text;
+    const trailing = /\s+$/.exec(combined)?.[0] ?? '';
+    const out = combined.slice(0, combined.length - trailing.length);
+    this.pendingWs = trailing;
+    if (out) {
+      this.emittedAny = true;
+      this.total += out;
+      this.sink(out);
+    }
+  }
 }
 
 @Injectable()
@@ -91,6 +188,73 @@ export class OllamaLlmProvider implements LlmProvider {
     }
     if (!content.trim()) throw new Error('ollama chat returned no content');
     return stripThink(content);
+  }
+
+  /**
+   * Streaming /api/chat (stream:true → NDJSON lines). Content deltas go to
+   * `onToken` as they arrive; once a tool_calls chunk shows up the rest of the
+   * round stays silent (content still assembled into the reply). Returns the
+   * assembled final reply, same shape as chat() with tools.
+   */
+  async chatStream(
+    messages: LlmMessage[],
+    tools: LlmTool[] | undefined,
+    onToken: (token: string) => void,
+  ): Promise<LlmReply> {
+    const base = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
+    const model = process.env.LLM_MODEL ?? 'qwen3:14b';
+    const res = await this.fetchFn(`${base}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: messages.map(toOllamaMessage),
+        stream: true,
+        think: false,
+        ...(tools?.length
+          ? { tools: tools.map((t) => ({ type: 'function', function: t })) }
+          : {}),
+      }),
+      signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`ollama chat failed: HTTP ${res.status}`);
+    if (!res.body) throw new Error('ollama chat returned no body');
+
+    let content = '';
+    const toolCalls: LlmToolCall[] = [];
+    const decoder = new TextDecoder();
+    let pending = '';
+    const handleLine = (line: string) => {
+      if (!line.trim()) return;
+      const obj = JSON.parse(line) as {
+        message?: {
+          content?: string;
+          tool_calls?: Array<{
+            function?: { name?: string; arguments?: Record<string, unknown> };
+          }>;
+        };
+        error?: string;
+      };
+      if (obj.error) throw new Error(`ollama chat stream error: ${obj.error}`);
+      for (const tc of obj.message?.tool_calls ?? []) {
+        toolCalls.push({ name: tc.function?.name ?? '', arguments: tc.function?.arguments ?? {} });
+      }
+      const delta = typeof obj.message?.content === 'string' ? obj.message.content : '';
+      if (delta) {
+        content += delta;
+        if (toolCalls.length === 0) onToken(delta);
+      }
+    };
+    for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+      pending += decoder.decode(chunk, { stream: true });
+      let nl: number;
+      while ((nl = pending.indexOf('\n')) !== -1) {
+        handleLine(pending.slice(0, nl));
+        pending = pending.slice(nl + 1);
+      }
+    }
+    handleLine(pending + decoder.decode());
+    return { content: stripThink(content), toolCalls };
   }
 }
 
