@@ -74,6 +74,14 @@ pnpm 11 monorepo (mirrors biblestdy): `apps/api` (NestJS + Drizzle + Vitest, pre
 - Worker dev: `python3 -m venv --without-pip apps/worker/.venv` + get-pip (host python3.14 lacks ensurepip), `pip install -r apps/worker/requirements-dev.txt`, run `python worker.py` with env set; tests `python -m pytest apps/worker` (fakes only — no whisper download, no db).
 - Prod: compose service `worker` (container `pkos-worker`, built from `apps/worker`), same `.env`.
 
+## Sermon enrichment (issue #8)
+
+- Worker stays transcription-only; enrichment is api-side (`src/sermons/enrichment.*`). Trigger: Nest interval poller (`ENRICH_POLL_INTERVAL_MS`, default 15s, 0 disables) claims `done` jobs without an article via atomic status flip + `FOR UPDATE SKIP LOCKED` — status chain `done → enriching → enriched | enrich_error` (append-only enum; worker untouched, it only claims `queued`/stale `processing`).
+- Generation: qwen3 (`LLM_PROVIDER`) strict-JSON prompt → `{title, summary, themes, bible_references, action_points, key_quotes, tags}`, lenient parse (fences/prose/camelCase tolerated). Transcripts over `ENRICH_INPUT_MAX_CHARS` (default 24000) get a per-piece condense pass first.
+- Article via `KnowledgeService.ingest` → `faith/sermons/YYYY-MM-DD Title - Speaker.md` (explicit-filename seam in `VaultService.writeNote`; date/speaker/title from upload metadata, fallback today + Unknown, user title wins over LLM suggestion). Frontmatter `source: sermon:<jobId>` (canonical provenance), tags = LLM tags + Bible refs as `ref:book-chapter` (e.g. `ref:john-3`, verses dropped). Body: summary/themes/refs/action points/key quotes + pointer to the job (transcript stays on the job row).
+- Idempotent: job stores `article_item_id` (FK set null) + `article_path`; enriched jobs are never re-claimed. `rebuild-index` re-links `article_item_id` from `source: sermon:*` frontmatter. Failure → `enrich_error` + message on the job, transcript intact.
+- Endpoints (prefix `/api`): `POST /sermons` also takes multipart text fields `{speaker?, date? (YYYY-MM-DD), title?}`; `GET /sermons[/:id]` rows now carry `speaker/sermonDate/title/articleItemId/articlePath/enrichError`; `POST /sermons/:id/enrich` = manual (re)trigger (409 when already enriched w/ `{itemId, path}`, 409 when no finished transcript; runs synchronously).
+
 ## Fitness (slice 11, issue #11)
 
 - Schema (PRIMARY, not vault-derived): `workouts` (date, notes) + `workout_sets` (exercise lowercase-normalized, set_no, reps, weight_kg null = bodyweight), `body_metrics` (date, weight_kg?, calories?, protein_g? — db check ≥1 non-null), `goals`.
