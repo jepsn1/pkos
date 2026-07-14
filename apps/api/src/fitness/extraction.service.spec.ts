@@ -98,21 +98,20 @@ beforeEach(() => {
 });
 
 describe('ExtractionService.run', () => {
-  it('persists parsed exercises with numbered sets, lowercases names, merges notes', async () => {
+  it('expands set groups into numbered sets, lowercases names, merges notes', async () => {
     llm.reply = JSON.stringify({
       exercises: [
         {
           exercise: '  Machine Fly ',
-          sets: [
-            { reps: 8, weight_kg: 93 },
-            { reps: 8, weight_kg: 93 },
-            { reps: 10, weight_kg: 73 },
+          groups: [
+            { sets: 2, reps: 8, weight_kg: 93 },
+            { sets: 1, reps: 10, weight_kg: 73 },
           ],
           note: 'perfect form',
         },
         {
           exercise: 'Pull-ups',
-          sets: [{ reps: 13, weight_kg: null }],
+          groups: [{ sets: 1, reps: 13, weight_kg: null }],
           note: null,
         },
       ],
@@ -149,25 +148,26 @@ describe('ExtractionService.run', () => {
     ]);
   });
 
-  it('drops out-of-bounds sets and set-less exercises into skipped, keeps the rest', async () => {
+  it('drops out-of-bounds groups and group-less exercises into skipped, keeps the rest', async () => {
     llm.reply = JSON.stringify({
       exercises: [
         {
           exercise: 'curls',
-          sets: [
-            { reps: 8, weight_kg: 16 },
-            { reps: 400, weight_kg: 16 }, // reps > 100
-            { reps: 8, weight_kg: 900 }, // weight > 500
-            { reps: 0, weight_kg: 16 }, // reps < 1
-            { reps: 8.5, weight_kg: 16 }, // non-integer reps
+          groups: [
+            { sets: 3, reps: 8, weight_kg: 16 },
+            { sets: 1, reps: 400, weight_kg: 16 }, // reps > 100
+            { sets: 1, reps: 8, weight_kg: 900 }, // weight > 500
+            { sets: 0, reps: 8, weight_kg: 16 }, // sets < 1
+            { sets: 12, reps: 8, weight_kg: 16 }, // sets > 10
+            { sets: 1, reps: 8.5, weight_kg: 16 }, // non-integer reps
           ],
           note: null,
         },
-        { exercise: 'sitting row', sets: [], note: null }, // header, no sets
-        { exercise: '', sets: [{ reps: 8, weight_kg: 10 }], note: null }, // nameless
+        { exercise: 'sitting row', groups: [], note: null }, // header, no sets
+        { exercise: '', groups: [{ sets: 1, reps: 8, weight_kg: 10 }], note: null }, // nameless
         {
           exercise: 'dips',
-          sets: [{ reps: 10, weight_kg: 0 }], // 0 kg → bodyweight
+          groups: [{ sets: 1, reps: 10, weight_kg: 0 }], // 0 kg → bodyweight
           note: null,
         },
       ],
@@ -178,21 +178,24 @@ describe('ExtractionService.run', () => {
 
     expect(res.logged).toBe(true);
     expect(res.exercises).toBe(2);
-    expect(res.sets).toBe(2);
-    expect(res.skipped).toHaveLength(6); // 4 bad sets + set-less header + nameless
+    expect(res.sets).toBe(4); // curls 3x8 + dips 1x10
+    expect(res.skipped).toHaveLength(7); // 5 bad groups + group-less header + nameless
     expect(res.skipped.join('\n')).toMatch(/curls.*400/);
     expect(res.skipped.join('\n')).toMatch(/curls.*900/);
+    expect(res.skipped.join('\n')).toMatch(/curls.*12/);
     expect(res.skipped.join('\n')).toMatch(/sitting row: no valid sets/);
     expect(res.skipped.join('\n')).toMatch(/exercise with no name/);
-    expect(repo.workouts[0].sets.map((s) => [s.exercise, s.reps, s.weightKg])).toEqual([
-      ['curls', 8, 16],
-      ['dips', 10, null],
+    expect(repo.workouts[0].sets.map((s) => [s.exercise, s.setNo, s.reps, s.weightKg])).toEqual([
+      ['curls', 1, 8, 16],
+      ['curls', 2, 8, 16],
+      ['curls', 3, 8, 16],
+      ['dips', 1, 10, null],
     ]);
   });
 
   it('nothing valid → logged:false with error, nothing persisted', async () => {
     llm.reply = JSON.stringify({
-      exercises: [{ exercise: 'x', sets: [{ reps: -1, weight_kg: null }], note: null }],
+      exercises: [{ exercise: 'x', groups: [{ sets: 1, reps: -1, weight_kg: null }], note: null }],
       general_notes: null,
     });
     const res = await service.run('text', '2026-07-14');
@@ -216,7 +219,7 @@ describe('ExtractionService.run', () => {
 
   it('strips a stray <think> block before parsing', async () => {
     llm.reply = `<think>hmm sets vs reps</think>${JSON.stringify({
-      exercises: [{ exercise: 'squat', sets: [{ reps: 5, weight_kg: 100 }], note: null }],
+      exercises: [{ exercise: 'squat', groups: [{ sets: 1, reps: 5, weight_kg: 100 }], note: null }],
       general_notes: null,
     })}`;
     const res = await service.run('text', '2026-07-14');

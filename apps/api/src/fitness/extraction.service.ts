@@ -14,7 +14,10 @@ export interface ExtractionLlm {
   ): Promise<string>;
 }
 
-/** JSON Schema handed to ollama's `format` — constrained decoding guarantees shape. */
+/** JSON Schema handed to ollama's `format` — constrained decoding guarantees shape.
+ *  Set GROUPS, not individual sets: "3x8 @ 93kg" is ONE {sets:3, reps:8, weight_kg:93}
+ *  — the model never has to repeat identical objects (qwen3 collapses repetition),
+ *  the server expands groups into per-set rows. */
 export const EXTRACTION_SCHEMA: Record<string, unknown> = {
   type: 'object',
   required: ['exercises', 'general_notes'],
@@ -23,15 +26,16 @@ export const EXTRACTION_SCHEMA: Record<string, unknown> = {
       type: 'array',
       items: {
         type: 'object',
-        required: ['exercise', 'sets', 'note'],
+        required: ['exercise', 'groups', 'note'],
         properties: {
           exercise: { type: 'string' },
-          sets: {
+          groups: {
             type: 'array',
             items: {
               type: 'object',
-              required: ['reps', 'weight_kg'],
+              required: ['sets', 'reps', 'weight_kg'],
               properties: {
+                sets: { type: 'integer' },
                 reps: { type: 'integer' },
                 weight_kg: { type: ['number', 'null'] },
               },
@@ -49,17 +53,30 @@ export const EXTRACTION_SCHEMA: Record<string, unknown> = {
  *  system prompt for the dedicated extraction call. */
 export const EXTRACTION_SYSTEM_PROMPT = `You convert ONE raw gym-workout log into JSON. The text is real and messy: any language (often Danish/English mix), typos, shorthand. Output ONLY the JSON.
 
+Each exercise gets set GROUPS: {"sets": how many sets, "reps": reps per set, "weight_kg": weight or null}.
+
 Rules:
 - Keep the user's own exercise names verbatim (any language), lowercased. Never translate or rename.
-- "AxB" means A sets of B reps: "3x8" = 3 sets of 8 reps ("bench 5x5 80kg" = five sets of {reps: 5, weight_kg: 80}).
-- Set counts are realistically 2-6 and reps 5-25. When AxB is ambiguous ("12x3", "15x3", "14x3"), the number in the 2-6 range is the SET count and the other is the reps: "12x3" = 3 sets of 12 reps, NEVER 12 sets of 3. Only read AxB as reps-first like this when A is outside 2-6 and B is inside it.
+- "AxB" means A sets of B reps: "3x8 93kg" = one group {"sets": 3, "reps": 8, "weight_kg": 93}. "5x5 80kg" = {"sets": 5, "reps": 5, "weight_kg": 80}.
+- Set counts are realistically 2-6 and reps 5-25. When AxB is ambiguous ("12x3", "15x3", "14x3"), the number in the 2-6 range is the SET count and the other is the reps: "12x3" = 3 sets of 12 reps ({"sets": 3, "reps": 12}), NEVER 12 sets of 3. Only read AxB as reps-first like this when A is outside 2-6 and B is inside it.
 - Comma decimals are European: "10,5kg" = 10.5 kg, "124,6" = 124.6, "15,8kg" = 15.8.
-- A weight followed by a comma-separated rep list is one set per rep: "28kg, 12,10,9" = 3 sets at 28 kg with reps 12, 10, 9 (descending rep lists are normal). "86kg 12,7" = 2 sets at 86 kg (12 reps, 7 reps).
-- A line/segment with ONLY numbers — weight and/or reps but NO exercise name (e.g. "73kg 3x10", "13,5kg 8,10,10") — CONTINUES the PREVIOUS exercise: append its sets to that same exercise (a different weight on the same movement). NEVER invent an exercise named after a weight like "73kg" or "13,5kg".
+- A weight followed by a comma-separated rep list is one single-set group per rep count: "28kg, 12,10,9" = three groups [{"sets":1,"reps":12,"weight_kg":28},{"sets":1,"reps":10,"weight_kg":28},{"sets":1,"reps":9,"weight_kg":28}] (descending reps are normal). "86kg 12,7" = two groups (12 reps, then 7 reps, both 86 kg).
+- A line/segment with ONLY numbers — weight and/or reps but NO exercise name (e.g. "73kg 3x10", "13,5kg 8,10,10") — CONTINUES the PREVIOUS exercise: append its groups to that same exercise (a different weight on the same movement). NEVER invent an exercise named after a weight like "73kg" or "13,5kg".
 - No weight given (e.g. "pull-ups 3x13") → weight_kg null (bodyweight).
-- Machine/equipment settings ("Seat 5, chest 3"), form remarks ("ny form", "bedre form", "perfect form", "perfekt form"), and questions ("op?", "increase?") are NEVER sets and NEVER exercises: put them in the note of the exercise they follow, or in general_notes if they follow nothing.
-- An exercise name with NO numbers at all (e.g. a bare "sitting row" header) gets sets: [] and a mention in general_notes — do not invent sets for it.
-- Weights are kg. Every exercise the user actually performed with numbers must appear, with EVERY set (a "3xN" entry always yields exactly 3 set objects).`;
+- Machine/equipment settings ("Seat 5, chest 3"), form remarks ("ny form", "bedre form", "perfect form", "perfekt form"), and questions ("op?", "increase?") are NEVER groups and NEVER exercises: put them in the note of the exercise they follow, or in general_notes if they follow nothing.
+- An exercise name with NO numbers at all (e.g. a bare "sitting row" header) gets groups: [] and a mention in general_notes — do not invent sets for it.
+- Weights are kg. EVERY line of the log must be accounted for — as an exercise, appended groups, or a note. Never drop a line, never mix one exercise's weight into another.
+
+Example input:
+Machine fly 93kg 3x8
+73kg 3x10 perfect form
+Incline dumbbell press 28kg, 12,10,9
+Seat 5, chest 3
+Pull-ups 3x13
+Sitting row
+
+Example output:
+{"exercises":[{"exercise":"machine fly","groups":[{"sets":3,"reps":8,"weight_kg":93},{"sets":3,"reps":10,"weight_kg":73}],"note":"perfect form"},{"exercise":"incline dumbbell press","groups":[{"sets":1,"reps":12,"weight_kg":28},{"sets":1,"reps":10,"weight_kg":28},{"sets":1,"reps":9,"weight_kg":28}],"note":"Seat 5, chest 3"},{"exercise":"pull-ups","groups":[{"sets":3,"reps":13,"weight_kg":null}],"note":null}],"general_notes":"sitting row (no sets given)"}`;
 
 /** One parsed+validated extraction result, as returned to the chat model. */
 export interface ExtractionSummary {
@@ -73,16 +90,18 @@ export interface ExtractionSummary {
   error?: string;
 }
 
-interface ParsedSet {
+interface ParsedGroup {
+  sets?: unknown;
   reps?: unknown;
   weight_kg?: unknown;
 }
 interface ParsedExercise {
   exercise?: unknown;
-  sets?: unknown;
+  groups?: unknown;
   note?: unknown;
 }
 
+const MAX_SETS_PER_GROUP = 10;
 const MAX_REPS = 100;
 const MAX_WEIGHT_KG = 500;
 
@@ -130,24 +149,38 @@ export class ExtractionService {
         noteParts.push(`${name}: ${raw.note.trim()}`);
       }
       const sets: Array<{ reps: number; weightKg: number | null }> = [];
-      for (const rawSet of (Array.isArray(raw.sets) ? raw.sets : []) as ParsedSet[]) {
-        const reps = rawSet?.reps;
-        if (typeof reps !== 'number' || !Number.isInteger(reps) || reps < 1 || reps > MAX_REPS) {
-          skipped.push(`${name}: set dropped (reps ${JSON.stringify(reps)} out of 1-${MAX_REPS})`);
+      for (const group of (Array.isArray(raw.groups) ? raw.groups : []) as ParsedGroup[]) {
+        const count = group?.sets;
+        if (
+          typeof count !== 'number' ||
+          !Number.isInteger(count) ||
+          count < 1 ||
+          count > MAX_SETS_PER_GROUP
+        ) {
+          skipped.push(
+            `${name}: group dropped (sets ${JSON.stringify(count)} out of 1-${MAX_SETS_PER_GROUP})`,
+          );
           continue;
         }
-        let weight = rawSet.weight_kg ?? null;
+        const reps = group.reps;
+        if (typeof reps !== 'number' || !Number.isInteger(reps) || reps < 1 || reps > MAX_REPS) {
+          skipped.push(
+            `${name}: group dropped (reps ${JSON.stringify(reps)} out of 1-${MAX_REPS})`,
+          );
+          continue;
+        }
+        let weight = group.weight_kg ?? null;
         if (weight === 0) weight = null; // 0 kg = bodyweight
         if (
           weight !== null &&
           (typeof weight !== 'number' || !Number.isFinite(weight) || weight < 0 || weight > MAX_WEIGHT_KG)
         ) {
           skipped.push(
-            `${name}: set dropped (weight ${JSON.stringify(weight)} out of 0-${MAX_WEIGHT_KG} kg)`,
+            `${name}: group dropped (weight ${JSON.stringify(weight)} out of 0-${MAX_WEIGHT_KG} kg)`,
           );
           continue;
         }
-        sets.push({ reps, weightKg: weight as number | null });
+        for (let i = 0; i < count; i++) sets.push({ reps, weightKg: weight as number | null });
       }
       if (sets.length === 0) {
         skipped.push(`${name}: no valid sets`);
@@ -210,6 +243,8 @@ export class OllamaExtractionLlm implements ExtractionLlm {
         stream: false,
         think: true,
         format: schema,
+        // long log + thinking blows past ollama's 4096 default ctx (silent truncation)
+        options: { num_ctx: Number(process.env.EXTRACT_NUM_CTX ?? 8192) },
       }),
       signal: AbortSignal.timeout(timeout),
     });
