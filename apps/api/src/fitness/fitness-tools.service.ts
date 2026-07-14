@@ -14,6 +14,13 @@ export const FITNESS_NOW = 'FITNESS_NOW';
 export const FITNESS_ROUTING = `You also have tools for the user's personal training log and metric log. These routing rules take precedence over the knowledge-base instructions above.
 Routing rules:
 - When the user reports a workout, exercises, sets or reps, call log_workout. "AxB" means A separate sets of B reps each ("bench 5x5 at 80kg" = five set entries, each {reps: 5, weight_kg: 80}).
+- Real gym logs are messy — parse them faithfully, in any language, keeping the user's own exercise names:
+  * Sets are almost always 2-6; reps usually 5-20. "12x3" therefore means 3 sets of 12 reps; "3x12" also 3 sets of 12. Use judgment, don't log 12 sets unless clearly meant.
+  * Comma decimals are European: "10,5kg" = 10.5 kg; "124,6kg" = 124.6.
+  * A bare rep list "28kg, 12,10,9" = three sets (12, 10, 9 reps) at 28 kg.
+  * Entries with no weight (bodyweight or unknown machine) → sets with weight omitted.
+  * Lines that are not exercises (machine seat settings, "better form" remarks, questions like "increase?") → fold into the workout notes, do not invent sets for them.
+  * Log the ENTIRE session as ONE log_workout call.
 - When the user states ANY personal numeric measurement — body weight, height, calories eaten, protein, sleep hours, resting heart rate, mood score, blood pressure, anything with a number — call log_metric. Reuse an existing metric name when one fits; bake the unit into the name (weight_kg, height_cm, sleep_hours, protein_g) or pass it as unit.
 - When the user asks anything about their own body or measurements — "what's my height", "how tall am I", "how much do I weigh", "how did I sleep", averages, trends, "what metrics do you have on me" — the answer IS in the metric log: ALWAYS call query_metric before answering (query=latest with the name; no name = every metric). NEVER say you lack access to their information without having called query_metric first. When the tool result is empty, say plainly that nothing is logged yet and offer to log it if they tell you — NEVER tell the user to "log in".
 - Broad questions about the user ("what do you know about me?", "tell me about myself") → call query_metric {query: latest} (no name) for their actual current values, then answer in prose combining those values with the knowledge items above. State values directly ("you're 180 cm tall"), not record metadata ("a metric was logged on...").
