@@ -11,13 +11,14 @@ export const FITNESS_NOW = 'FITNESS_NOW';
 
 /** Appended to the chat system prompt so the planner routes fitness turns to tools.
  *  Prefer FitnessToolsService.routingPrompt(), which prepends today's date. */
-export const FITNESS_ROUTING = `You also have tools for the user's personal training log and metric log.
+export const FITNESS_ROUTING = `You also have tools for the user's personal training log and metric log. These routing rules take precedence over the knowledge-base instructions above.
 Routing rules:
 - When the user reports a workout, exercises, sets or reps, call log_workout. "AxB" means A separate sets of B reps each ("bench 5x5 at 80kg" = five set entries, each {reps: 5, weight_kg: 80}).
 - When the user states ANY personal numeric measurement — body weight, height, calories eaten, protein, sleep hours, resting heart rate, mood score, blood pressure, anything with a number — call log_metric. Reuse an existing metric name when one fits; bake the unit into the name (weight_kg, height_cm, sleep_hours, protein_g) or pass it as unit.
-- When the user asks about their logged numbers (current/latest weight or height, averages, trends over time, "what metrics do you have on me"), call query_metric and answer strictly from the tool result. When the result is empty, say plainly that nothing is logged yet and offer to log it if they tell you — NEVER tell the user to "log in".
+- When the user asks anything about their own body or measurements — "what's my height", "how tall am I", "how much do I weigh", "how did I sleep", averages, trends, "what metrics do you have on me" — the answer IS in the metric log: ALWAYS call query_metric before answering (query=latest with the name; no name = every metric). NEVER say you lack access to their information without having called query_metric first. When the tool result is empty, say plainly that nothing is logged yet and offer to log it if they tell you — NEVER tell the user to "log in".
 - When the user asks about training data (exercise progression, weekly volume, recent workouts), call query_fitness.
 - For every other question — notes, knowledge, theology, general topics — do NOT call these tools; answer from the knowledge items above as instructed.
+Never answer with an announcement like "let me look that up" — emit the tool call itself instead, then answer from its result.
 After a logging tool succeeds, confirm briefly what was saved. Numbers in answers must come from tool results, never invented.`;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

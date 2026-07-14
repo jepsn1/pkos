@@ -84,15 +84,21 @@ pnpm 11 monorepo (mirrors biblestdy): `apps/api` (NestJS + Drizzle + Vitest, pre
 
 ## Fitness (slice 11, issue #11)
 
-- Schema (PRIMARY, not vault-derived): `workouts` (date, notes) + `workout_sets` (exercise lowercase-normalized, set_no, reps, weight_kg null = bodyweight), `body_metrics` (date, weight_kg?, calories?, protein_g? — db check ≥1 non-null), `goals`.
+- Schema (PRIMARY, not vault-derived): `workouts` (date, notes) + `workout_sets` (exercise lowercase-normalized, set_no, reps, weight_kg null = bodyweight), `metric_entries` (name normalized lowercase snake_case e.g. weight_kg/height_cm/sleep_hours, date, value numeric, unit?, (name,date) idx — nothing hardcoded per metric), `goals`.
 - Logging/querying happens through `POST /api/chat` via LLM tool calls (ollama-native `tools` on /api/chat). `LlmProvider.chat(messages, tools?)`: plain string without tools (legacy), `LlmReply {content, toolCalls}` with them — backward compatible. Tool loop in `ChatService`, max 4 rounds; bad tool args go back to the model as `{error}` instead of throwing.
 - Tools (`src/fitness/fitness-tools.service.ts`, executors behind `FITNESS_REPO` — parameterized queries only, model never writes SQL):
   - `log_workout` `{date?, exercises: [{exercise, sets: [{reps, weight_kg?}]}], notes?}`
-  - `log_body_metric` `{date?, weight_kg?, calories?, protein_g?}` (≥1 metric)
-  - `query_fitness` `{query: metric_avg|exercise_progression|weekly_volume|recent_workouts, metric?, since?, until?, exercise?, limit?}` — metric_avg defaults to last 7 days incl. today; weeks start Monday.
-- Planner: system prompt appends `FitnessToolsService.routingPrompt()` — routing rules + today's date (qwen3 invents dates otherwise) + "5x5 = five set entries" (it collapsed AxB to one set otherwise). Fitness turns → tools; everything else → existing vector retrieval, unchanged.
-- REST fallback (prefix `/api`): `GET /fitness/workouts` (recent 50 w/ sets), `GET /fitness/metrics` (date desc).
+  - `log_metric` `{name, value, unit?, date?}` — freeform name normalized to lowercase snake_case ("Height (cm)" → height_cm); prompt says reuse existing names + bake the unit into name or unit field.
+  - `query_metric` `{query: latest|avg|series|names, name?, since?, until?, limit?}` — latest w/o name = latest entry of EVERY metric ("what metrics do you have on me"); avg defaults to trailing 7 days incl. today; names = distinct names w/ counts + last date.
+  - `query_fitness` `{query: exercise_progression|weekly_volume|recent_workouts, exercise?, since?, limit?}` — weeks start Monday.
+- Planner: system prompt appends `FitnessToolsService.routingPrompt()` — routing rules + today's date (qwen3 invents dates otherwise) + "5x5 = five set entries" (it collapsed AxB otherwise) + "never announce 'let me look it up' — emit the tool call" (qwen3 narrated instead of calling otherwise). Any numeric self-measurement → log_metric; questions about own measurements → query_metric (empty result → "nothing logged yet", never "log in"); everything else → existing vector retrieval, unchanged.
+- REST fallback (prefix `/api`): `GET /fitness/workouts` (recent 50 w/ sets), `GET /fitness/metrics[?name=]` (date desc).
 - `LLM_TIMEOUT_MS` env overrides the 120s ollama timeout (tool loops = several LLM round trips; shared ollama queues).
+
+## Assistant writes knowledge: save_note
+
+- `KnowledgeToolsService` (`src/knowledge/knowledge-tools.service.ts`, exported from KnowledgeModule): tool `save_note` `{title, markdown, folder?, tags?, summary?}` → `KnowledgeService.ingest` with `source: 'chat'` — vault file + commit + row + embedding + suggester hook, same as any ingest. Validation as `{error}` back to the model (folder must be a relative vault path, no `..`).
+- `ChatService` takes both toolsets `@Optional()` (fitness, knowledgeTools — appended ctor params), merges their `tools` into one offered list, dispatches each tool call by name to its owning set, and concatenates their `routingPrompt()`s onto the system prompt. Routing: "remember/save/store a fact, preference or note that is NOT a numeric metric" → save_note, confirm with the saved path. No toolsets wired → behavior identical to pre-tool chat.
 
 ## AI organization suggestions (slice 12, issue #12)
 
