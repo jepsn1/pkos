@@ -56,6 +56,11 @@ export function toReply(reply: string | LlmReply): LlmReply {
 
 // qwen3:14b on the 6900 XT does ~50 tok/s, but long answers + cold model load add up
 // (and other agents may queue on the shared ollama — override via env when needed).
+/** Some models (qwen3:30b-a3b on ollama 0.31.x) ignore think:false and leak
+ *  reasoning into content untagged. think:true routes reasoning into the
+ *  separate `thinking` field (which we drop), keeping content clean — so
+ *  LLM_THINK=true is the correct setting for those models. */
+const LLM_THINK = process.env.LLM_THINK === 'true';
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS ?? 120_000);
 
 /** Remove qwen3 <think>…</think> blocks (belt and braces on top of think:false). */
@@ -162,7 +167,7 @@ export class OllamaLlmProvider implements LlmProvider {
         model,
         messages: messages.map(toOllamaMessage),
         stream: false,
-        think: false,
+        think: LLM_THINK,
         ...(tools?.length
           ? { tools: tools.map((t) => ({ type: 'function', function: t })) }
           : {}),
@@ -210,7 +215,7 @@ export class OllamaLlmProvider implements LlmProvider {
         model,
         messages: messages.map(toOllamaMessage),
         stream: true,
-        think: false,
+        think: LLM_THINK,
         ...(tools?.length
           ? { tools: tools.map((t) => ({ type: 'function', function: t })) }
           : {}),
