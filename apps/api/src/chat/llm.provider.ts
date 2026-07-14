@@ -62,6 +62,12 @@ export function toReply(reply: string | LlmReply): LlmReply {
  *  separate `thinking` field (which we drop), keeping content clean — so
  *  LLM_THINK=true is the correct setting for those models. */
 const LLM_THINK = process.env.LLM_THINK === 'true';
+/** Context window + per-round generation cap. Defaults sized for qwen3:30b-a3b
+ *  on 16GB VRAM: 4096 (ollama default) overflows on our system prompt + tools +
+ *  thinking and sends the model into 19k-token runaway loops; the cap makes any
+ *  future runaway die in ~75s instead of blocking the serial queue for minutes. */
+const LLM_NUM_CTX = Number(process.env.LLM_NUM_CTX ?? 8192);
+const LLM_NUM_PREDICT = Number(process.env.LLM_NUM_PREDICT ?? 4096);
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS ?? 120_000);
 
 /** Remove qwen3 <think>…</think> blocks (belt and braces on top of think:false). */
@@ -169,6 +175,7 @@ export class OllamaLlmProvider implements LlmProvider {
         messages: messages.map(toOllamaMessage),
         stream: false,
         think: LLM_THINK,
+        options: { num_ctx: LLM_NUM_CTX, num_predict: LLM_NUM_PREDICT },
         ...(tools?.length
           ? { tools: tools.map((t) => ({ type: 'function', function: t })) }
           : {}),
@@ -218,6 +225,7 @@ export class OllamaLlmProvider implements LlmProvider {
         messages: messages.map(toOllamaMessage),
         stream: true,
         think: LLM_THINK,
+        options: { num_ctx: LLM_NUM_CTX, num_predict: LLM_NUM_PREDICT },
         ...(tools?.length
           ? { tools: tools.map((t) => ({ type: 'function', function: t })) }
           : {}),
