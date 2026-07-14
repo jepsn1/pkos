@@ -7,6 +7,7 @@ import {
   type GraphRetrieval,
 } from '../graph/graph.retrieval';
 import { EMBEDDING_PROVIDER, type EmbeddingProvider } from '../knowledge/embedding.provider';
+import { KnowledgeToolsService } from '../knowledge/knowledge-tools.service';
 import { KNOWLEDGE_REPO, type KnowledgeRepo, type SearchHit } from '../knowledge/knowledge.repo';
 import { VaultService } from '../knowledge/vault.service';
 import {
@@ -24,7 +25,16 @@ import {
   type LlmMessage,
   type LlmProvider,
   type LlmReply,
+  type LlmTool,
+  type LlmToolCall,
 } from './llm.provider';
+
+/** A service exposing LLM tools: definitions, executor, and routing rules. */
+interface ToolSet {
+  readonly tools: LlmTool[];
+  routingPrompt(): string;
+  execute(call: LlmToolCall): Promise<string>;
+}
 
 export interface ChatResult {
   conversationId: string;
@@ -62,7 +72,14 @@ export class ChatService {
     private readonly vault: VaultService,
     @Inject(GRAPH_RETRIEVAL) private readonly graph: GraphRetrieval,
     @Optional() private readonly fitness?: FitnessToolsService,
+    @Optional() private readonly knowledgeTools?: KnowledgeToolsService,
   ) {}
+
+  /** Every tool-exposing service that is wired in (each is optional). */
+  private toolsets(): ToolSet[] {
+    const sets: Array<ToolSet | undefined> = [this.fitness, this.knowledgeTools];
+    return sets.filter((s): s is ToolSet => s !== undefined);
+  }
 
   async chat(message: string, conversationId?: string): Promise<ChatResult> {
     let conversation: Conversation;
@@ -137,9 +154,10 @@ export class ChatService {
       ...history,
       { role: 'user', content: message },
     ];
-    // Planner: fitness tools are offered on every turn; the system prompt routes
-    // fitness statements/questions to them, everything else stays on retrieval.
-    const tools = this.fitness?.tools;
+    // Planner: all wired toolsets (fitness, knowledge) are offered on every turn;
+    // the system prompt routes matching turns to them, the rest stays on retrieval.
+    const toolsets = this.toolsets();
+    const tools = toolsets.length > 0 ? toolsets.flatMap((s) => s.tools) : undefined;
     // Streaming: one think-filter per LLM round, all filters share the emitted
     // accumulator — in practice tool rounds emit nothing (the provider silences
     // content once a tool_call appears), so `emitted` = the final prose round.
@@ -158,7 +176,7 @@ export class ChatService {
     let reply = await callLlm();
     for (
       let round = 0;
-      this.fitness && reply.toolCalls.length > 0 && round < MAX_TOOL_ROUNDS;
+      toolsets.length > 0 && reply.toolCalls.length > 0 && round < MAX_TOOL_ROUNDS;
       round++
     ) {
       llmMessages.push({
@@ -167,9 +185,12 @@ export class ChatService {
         toolCalls: reply.toolCalls,
       });
       for (const call of reply.toolCalls) {
+        // Dispatch by tool name; unknown names land on the first set → {error}.
+        const owner =
+          toolsets.find((s) => s.tools.some((t) => t.name === call.name)) ?? toolsets[0];
         llmMessages.push({
           role: 'tool',
-          content: await this.fitness.execute(call),
+          content: await owner.execute(call),
           toolName: call.name,
         });
       }
@@ -199,7 +220,9 @@ export class ChatService {
 
   /** Retrieval hits + their graph neighbors rendered with vault bodies for grounding. */
   private async systemPrompt(hits: SearchHit[], neighbors: GraphNeighbor[] = []): Promise<string> {
-    const routing = this.fitness ? `\n\n${this.fitness.routingPrompt()}` : '';
+    const routing = this.toolsets()
+      .map((s) => `\n\n${s.routingPrompt()}`)
+      .join('');
     if (hits.length === 0) return `${SYSTEM_NO_HITS}${routing}`;
     const items = await Promise.all(
       hits.map(async (h, i) => {

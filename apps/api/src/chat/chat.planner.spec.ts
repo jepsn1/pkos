@@ -9,7 +9,9 @@ import type {
   WorkoutWithSets,
 } from '../fitness/fitness.repo';
 import type { EmbeddingProvider } from '../knowledge/embedding.provider';
-import type { KnowledgeRepo, SearchHit } from '../knowledge/knowledge.repo';
+import { KnowledgeToolsService } from '../knowledge/knowledge-tools.service';
+import type { KnowledgeItem, KnowledgeRepo, SearchHit } from '../knowledge/knowledge.repo';
+import type { IngestRequest, KnowledgeService } from '../knowledge/knowledge.service';
 import { VaultService } from '../knowledge/vault.service';
 import type { GraphRetrieval } from '../graph/graph.retrieval';
 import type {
@@ -136,6 +138,26 @@ class FakeFitnessRepo implements FitnessRepo {
   recentWorkouts = rejectUnused;
 }
 
+/** Records ingest calls; canned item echoing the request (for save_note). */
+class FakeKnowledgeService {
+  ingested: IngestRequest[] = [];
+
+  async ingest(req: IngestRequest): Promise<KnowledgeItem> {
+    this.ingested.push(req);
+    return {
+      id: 'item-1',
+      path: `${req.folder ?? 'articles'}/esv-preference.md`,
+      title: req.title,
+      source: req.source ?? null,
+      tags: req.tags ?? [],
+      summary: req.summary ?? null,
+      importance: null,
+      created: '2026-07-13',
+      updated: new Date(),
+    };
+  }
+}
+
 function knowledgeRepoWith(hits: SearchHit[]): KnowledgeRepo {
   return {
     search: async (_e: number[], limit: number) => hits.slice(0, limit),
@@ -157,17 +179,22 @@ const GRACE_HIT: SearchHit = {
 
 let chatRepo: FakeChatRepo;
 let fitnessRepo: FakeFitnessRepo;
+let knowledgeService: FakeKnowledgeService;
 let llm: FakeToolLlm;
 
 beforeEach(() => {
   chatRepo = new FakeChatRepo();
   fitnessRepo = new FakeFitnessRepo();
+  knowledgeService = new FakeKnowledgeService();
   llm = new FakeToolLlm();
 });
 
-function makeService(hits: SearchHit[] = []): ChatService {
+function makeService(hits: SearchHit[] = [], withKnowledgeTools = false): ChatService {
   const vault = new VaultService('/nonexistent-vault', async () => {});
   const fitness = new FitnessToolsService(fitnessRepo, () => new Date('2026-07-13T10:00:00Z'));
+  const knowledgeTools = withKnowledgeTools
+    ? new KnowledgeToolsService(knowledgeService as unknown as KnowledgeService)
+    : undefined;
   const noGraph: GraphRetrieval = { neighbors: async () => [] };
   return new ChatService(
     chatRepo,
@@ -177,6 +204,7 @@ function makeService(hits: SearchHit[] = []): ChatService {
     vault,
     noGraph,
     fitness,
+    knowledgeTools,
   );
 }
 
@@ -335,5 +363,79 @@ describe('ChatService planner (fitness tools)', () => {
     expect(system).toContain('ONLY');
     expect(system).toContain('faith/reflections/on-grace.md');
     expect(system).toContain('do NOT call these tools');
+  });
+});
+
+describe('ChatService planner (knowledge tools)', () => {
+  it('merges save_note into the offered tools + routing prompt, dispatches to KnowledgeToolsService', async () => {
+    const service = makeService([], true);
+    llm.queue.push(
+      {
+        content: '',
+        toolCalls: [
+          {
+            name: 'save_note',
+            arguments: {
+              title: 'ESV preference',
+              markdown: 'Prefers the ESV translation for bible study.',
+              folder: 'faith',
+            },
+          },
+        ],
+      },
+      'Saved to faith/esv-preference.md.',
+    );
+
+    const res = await service.chat('remember that I prefer the ESV translation');
+
+    // both toolsets offered in one merged list
+    expect(llm.calls[0].tools?.map((t) => t.name)).toEqual([
+      'log_workout',
+      'log_metric',
+      'query_metric',
+      'query_fitness',
+      'save_note',
+    ]);
+    // both routing prompts in the system slot
+    const system = llm.calls[0].messages[0].content;
+    expect(system).toContain('log_metric');
+    expect(system).toContain('save_note');
+
+    // dispatched to the knowledge service, not fitness
+    expect(knowledgeService.ingested).toEqual([
+      {
+        title: 'ESV preference',
+        markdown: 'Prefers the ESV translation for bible study.',
+        source: 'chat',
+        folder: 'faith',
+        tags: undefined,
+        summary: undefined,
+      },
+    ]);
+    expect(fitnessRepo.workouts).toHaveLength(0);
+    const toolTurn = llm.calls[1].messages.at(-1)!;
+    expect(toolTurn.toolName).toBe('save_note');
+    expect(JSON.parse(toolTurn.content)).toMatchObject({
+      saved: true,
+      path: 'faith/esv-preference.md',
+    });
+    expect(res.answer).toBe('Saved to faith/esv-preference.md.');
+  });
+
+  it('fitness dispatch still works with both toolsets wired', async () => {
+    const service = makeService([], true);
+    llm.queue.push(
+      {
+        content: '',
+        toolCalls: [{ name: 'log_metric', arguments: { name: 'weight_kg', value: 82 } }],
+      },
+      'Logged 82 kg.',
+    );
+
+    const res = await service.chat('I weigh 82 kg');
+
+    expect(fitnessRepo.metrics.map((m) => m.name)).toEqual(['weight_kg']);
+    expect(knowledgeService.ingested).toHaveLength(0);
+    expect(res.answer).toBe('Logged 82 kg.');
   });
 });
