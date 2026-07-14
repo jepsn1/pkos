@@ -95,13 +95,18 @@ export class SuggesterService implements OnModuleInit {
     for (const tag of llm?.tags ?? []) {
       proposals.push({ kind: 'tag', payload: { tag } });
     }
-    if (!note.meta.summary && llm?.summary) {
-      proposals.push({ kind: 'summary', payload: { summary: llm.summary } });
-    }
-
     // Re-triggering must not pile up identical pendings or re-nag resolved ones.
     // Canonical key: jsonb round-trips reorder payload keys.
     const existing = await this.repo.listByItem(itemId);
+
+    // The LLM rephrases every run — one open summary proposal per item is enough.
+    const hasPendingSummary = existing.some(
+      (s) => s.kind === 'summary' && s.status === 'pending',
+    );
+    if (!note.meta.summary && !hasPendingSummary && llm?.summary) {
+      proposals.push({ kind: 'summary', payload: { summary: llm.summary } });
+    }
+
     const seen = new Set(existing.map((s) => dedupKey(s.kind, s.payload)));
     const created: Suggestion[] = [];
     for (const p of proposals) {

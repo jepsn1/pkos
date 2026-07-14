@@ -333,6 +333,23 @@ describe('SuggesterService.generate — LLM tags, link types, summary', () => {
     expect(ofKind('summary')).toHaveLength(0);
   });
 
+  it('at most one pending summary per item (LLM rephrases every run)', async () => {
+    llm.reply = '{"tags": [], "links": [], "summary": "Wording one."}';
+    await suggester.generate(GRACE.id);
+    llm.reply = '{"tags": [], "links": [], "summary": "Wording two."}';
+    await suggester.generate(GRACE.id);
+    expect(ofKind('summary').map((s) => s.payload)).toEqual([{ summary: 'Wording one.' }]);
+
+    // rejected → a fresh proposal may come back
+    await service.reject(ofKind('summary')[0].id);
+    llm.reply = '{"tags": [], "links": [], "summary": "Wording three."}';
+    await suggester.generate(GRACE.id);
+    expect(ofKind('summary').map((s) => s.payload)).toEqual([
+      { summary: 'Wording one.' },
+      { summary: 'Wording three.' },
+    ]);
+  });
+
   it('LLM failure loses tags/summary but keeps embedding-derived suggestions', async () => {
     llm.fail = true;
     repo.neighbors = [
