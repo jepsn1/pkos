@@ -82,6 +82,19 @@ services:
       - /srv/data/ollama:/root/.ollama
     networks: [web]
 
+  # DB table inspector (tailscale-only). Login: server infra-postgres, user pkos
+  # + pkos db password from .env DATABASE_URL (or postgres superuser for other dbs,
+  # password in /srv/infra/compose/.env).
+  adminer:
+    image: adminer:latest
+    container_name: pkos-adminer
+    restart: unless-stopped
+    environment:
+      ADMINER_DEFAULT_SERVER: infra-postgres
+    networks: [web]
+    ports:
+      - "${TAILSCALE_IP:?set TAILSCALE_IP in .env}:8082:8080"
+
 networks:
   web:
     external: true
