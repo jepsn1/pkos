@@ -191,9 +191,15 @@ export class ChatService {
         // Dispatch by tool name; unknown names land on the first set → {error}.
         const owner =
           toolsets.find((s) => s.tools.some((t) => t.name === call.name)) ?? toolsets[0];
+        const result = await owner.execute(call);
+        // Observability: tool routing is the main failure mode of small local
+        // models — log every call verbatim so "it said no data" is debuggable.
+        console.log(
+          `[tool] ${call.name} args=${JSON.stringify(call.arguments)} -> ${result.slice(0, 200)}`,
+        );
         llmMessages.push({
           role: 'tool',
-          content: await owner.execute(call),
+          content: result,
           toolName: call.name,
         });
       }
