@@ -8,7 +8,9 @@ export interface EmbeddingProvider {
   embed(text: string): Promise<number[]>;
 }
 
-const EMBED_TIMEOUT_MS = 30_000;
+// Generous: embeds are ms of compute, but can queue behind an in-flight qwen
+// generation when ollama juggles model loading on the shared GPU.
+const EMBED_TIMEOUT_MS = Number(process.env.EMBED_TIMEOUT_MS ?? 120_000);
 
 @Injectable()
 export class OllamaEmbeddingProvider implements EmbeddingProvider {

@@ -65,6 +65,10 @@ services:
     image: ollama/ollama:rocm
     container_name: pkos-ollama
     restart: unless-stopped
+    environment:
+      # qwen3:14b (9.6G) + nomic-embed (0.3G) fit 16G VRAM together — keep both
+      # resident so embeds never wait on a model load behind a long generation.
+      OLLAMA_KEEP_ALIVE: 24h
     devices:
       - /dev/kfd
       - /dev/dri
