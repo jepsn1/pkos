@@ -1,7 +1,5 @@
-import { sql } from 'drizzle-orm';
 import {
   boolean,
-  check,
   date,
   index,
   integer,
@@ -227,21 +225,22 @@ export const workoutSets = pgTable(
   ],
 );
 
-export const bodyMetrics = pgTable(
-  'body_metrics',
+/**
+ * Dynamic metric log — one row per measurement, nothing hardcoded per metric.
+ * `name` is normalized lowercase snake_case with the unit baked in where natural
+ * (weight_kg, height_cm, sleep_hours, protein_g); `unit` is a free-text fallback.
+ */
+export const metricEntries = pgTable(
+  'metric_entries',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    name: text('name').notNull(),
     date: date('date').notNull(),
-    weightKg: numeric('weight_kg', { precision: 5, scale: 2 }),
-    calories: integer('calories'),
-    proteinG: numeric('protein_g', { precision: 6, scale: 1 }),
+    value: numeric('value').notNull(),
+    unit: text('unit'),
+    created: timestamp('created', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [
-    check(
-      'body_metrics_at_least_one',
-      sql`${t.weightKg} IS NOT NULL OR ${t.calories} IS NOT NULL OR ${t.proteinG} IS NOT NULL`,
-    ),
-  ],
+  (t) => [index('metric_entries_name_date_idx').on(t.name, t.date)],
 );
 
 export const goals = pgTable('goals', {

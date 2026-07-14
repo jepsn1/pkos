@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { FitnessToolsService } from '../fitness/fitness-tools.service';
 import type {
-  BodyMetricRow,
   FitnessRepo,
-  NewBodyMetric,
+  MetricRow,
+  NewMetric,
   NewWorkoutExercise,
   WorkoutWithSets,
 } from '../fitness/fitness.repo';
@@ -51,10 +51,10 @@ class NonStreamLlm implements LlmProvider {
 const rejectUnused = () => Promise.reject(new Error('unused'));
 
 class FakeFitnessRepo implements FitnessRepo {
-  metrics: BodyMetricRow[] = [];
+  metrics: MetricRow[] = [];
   private seq = 0;
 
-  async insertBodyMetric(m: NewBodyMetric): Promise<BodyMetricRow> {
+  async insertMetric(m: NewMetric): Promise<MetricRow> {
     const row = { id: `m-${++this.seq}`, ...m };
     this.metrics.push(row);
     return row;
@@ -66,11 +66,14 @@ class FakeFitnessRepo implements FitnessRepo {
   ): Promise<WorkoutWithSets> {
     return rejectUnused();
   }
+  latestMetric = rejectUnused;
+  latestMetrics = rejectUnused;
   metricsBetween = rejectUnused;
+  metricNames = rejectUnused;
+  listMetrics = rejectUnused;
   setsForExercise = rejectUnused;
   setsSince = rejectUnused;
   recentWorkouts = rejectUnused;
-  listMetrics = rejectUnused;
 }
 
 const fakeEmbedder: EmbeddingProvider = { embed: async () => [1, 0, 0] };
@@ -160,7 +163,7 @@ describe('ChatService.answer streaming', () => {
         tokens: [], // provider keeps tool rounds silent
         reply: {
           content: '',
-          toolCalls: [{ name: 'log_body_metric', arguments: { weight_kg: 82.5 } }],
+          toolCalls: [{ name: 'log_metric', arguments: { name: 'weight_kg', value: 82.5 } }],
         },
       },
       {

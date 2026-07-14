@@ -1,4 +1,4 @@
-import { Controller, Get, Inject } from '@nestjs/common';
+import { Controller, Get, Inject, Query } from '@nestjs/common';
 import { FITNESS_REPO, type FitnessRepo } from './fitness.repo';
 
 /** Thin REST fallback for UI/verification; logging happens through chat tools. */
@@ -12,7 +12,7 @@ export class FitnessController {
   }
 
   @Get('metrics')
-  async metrics() {
-    return this.repo.listMetrics();
+  async metrics(@Query('name') name?: string) {
+    return this.repo.listMetrics(name || undefined);
   }
 }

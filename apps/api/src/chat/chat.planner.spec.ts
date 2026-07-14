@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { FitnessToolsService } from '../fitness/fitness-tools.service';
 import type {
-  BodyMetricRow,
   FitnessRepo,
-  NewBodyMetric,
+  MetricNameRow,
+  MetricRow,
+  NewMetric,
   NewWorkoutExercise,
   WorkoutWithSets,
 } from '../fitness/fitness.repo';
@@ -75,7 +76,7 @@ const rejectUnused = () => Promise.reject(new Error('unused'));
 
 class FakeFitnessRepo implements FitnessRepo {
   workouts: WorkoutWithSets[] = [];
-  metrics: BodyMetricRow[] = [];
+  metrics: MetricRow[] = [];
   private seq = 0;
 
   async createWorkout(
@@ -98,18 +99,41 @@ class FakeFitnessRepo implements FitnessRepo {
     this.workouts.push(w);
     return w;
   }
-  async insertBodyMetric(m: NewBodyMetric): Promise<BodyMetricRow> {
+  async insertMetric(m: NewMetric): Promise<MetricRow> {
     const row = { id: `m-${++this.seq}`, ...m };
     this.metrics.push(row);
     return row;
   }
-  async metricsBetween(since: string, until: string): Promise<BodyMetricRow[]> {
-    return this.metrics.filter((m) => m.date >= since && m.date <= until);
+  async latestMetric(name: string): Promise<MetricRow | null> {
+    return (
+      [...this.metrics]
+        .filter((m) => m.name === name)
+        .sort((a, b) => b.date.localeCompare(a.date))[0] ?? null
+    );
   }
+  async latestMetrics(): Promise<MetricRow[]> {
+    const names = [...new Set(this.metrics.map((m) => m.name))].sort();
+    const rows: MetricRow[] = [];
+    for (const n of names) rows.push((await this.latestMetric(n))!);
+    return rows;
+  }
+  async metricsBetween(
+    name: string,
+    since: string | null,
+    until: string | null,
+  ): Promise<MetricRow[]> {
+    return this.metrics.filter(
+      (m) =>
+        m.name === name &&
+        (since === null || m.date >= since) &&
+        (until === null || m.date <= until),
+    );
+  }
+  metricNames = (): Promise<MetricNameRow[]> => rejectUnused();
+  listMetrics = rejectUnused;
   setsForExercise = rejectUnused;
   setsSince = rejectUnused;
   recentWorkouts = rejectUnused;
-  listMetrics = rejectUnused;
 }
 
 function knowledgeRepoWith(hits: SearchHit[]): KnowledgeRepo {
@@ -184,7 +208,8 @@ describe('ChatService planner (fitness tools)', () => {
     // routing: tools offered on the first call, routing text in the system prompt
     expect(llm.calls[0].tools?.map((t) => t.name)).toEqual([
       'log_workout',
-      'log_body_metric',
+      'log_metric',
+      'query_metric',
       'query_fitness',
     ]);
     expect(llm.calls[0].messages[0].content).toContain('log_workout');
@@ -210,20 +235,45 @@ describe('ChatService planner (fitness tools)', () => {
     expect(chatRepo.messages[1].content).toBe(res.answer);
   });
 
-  it('runs multi-round tool loops (call → result → another call → answer)', async () => {
+  it('logs a freeform metric ("my height is 180 cm" → log_metric height_cm)', async () => {
     const service = makeService();
     llm.queue.push(
       {
         content: '',
         toolCalls: [
-          { name: 'log_body_metric', arguments: { weight_kg: 82.4, protein_g: 160 } },
+          { name: 'log_metric', arguments: { name: 'Height (cm)', value: 180 } },
+        ],
+      },
+      'Saved: height 180 cm.',
+    );
+
+    const res = await service.chat('my height is 180 cm');
+
+    expect(fitnessRepo.metrics).toEqual([
+      { id: 'm-1', name: 'height_cm', date: '2026-07-13', value: 180, unit: null },
+    ]);
+    const toolTurn = llm.calls[1].messages.at(-1)!;
+    expect(JSON.parse(toolTurn.content)).toMatchObject({
+      logged: true,
+      name: 'height_cm',
+      value: 180,
+    });
+    expect(res.answer).toBe('Saved: height 180 cm.');
+  });
+
+  it('runs multi-round tool loops (calls → results → another call → answer)', async () => {
+    const service = makeService();
+    llm.queue.push(
+      {
+        content: '',
+        toolCalls: [
+          { name: 'log_metric', arguments: { name: 'weight_kg', value: 82.4 } },
+          { name: 'log_metric', arguments: { name: 'protein_g', value: 160 } },
         ],
       },
       {
         content: '',
-        toolCalls: [
-          { name: 'query_fitness', arguments: { query: 'metric_avg', metric: 'protein_g' } },
-        ],
+        toolCalls: [{ name: 'query_metric', arguments: { query: 'avg', name: 'protein_g' } }],
       },
       'Logged. Your 7-day protein average is 160g.',
     );
@@ -231,25 +281,25 @@ describe('ChatService planner (fitness tools)', () => {
     const res = await service.chat('log weight 82.4 and 160g protein, how am I trending?');
 
     expect(llm.calls).toHaveLength(3);
-    expect(fitnessRepo.metrics).toHaveLength(1);
+    expect(fitnessRepo.metrics.map((m) => m.name)).toEqual(['weight_kg', 'protein_g']);
     const avgResult = JSON.parse(llm.calls[2].messages.at(-1)!.content);
-    expect(avgResult).toMatchObject({ metric: 'protein_g', count: 1, avg: 160 });
+    expect(avgResult).toMatchObject({ name: 'protein_g', count: 1, avg: 160 });
     expect(res.answer).toBe('Logged. Your 7-day protein average is 160g.');
   });
 
   it('feeds bad tool args back as {error} so the model can recover', async () => {
     const service = makeService();
     llm.queue.push(
-      { content: '', toolCalls: [{ name: 'log_body_metric', arguments: {} }] },
-      'I need at least one metric — weight, calories or protein.',
+      { content: '', toolCalls: [{ name: 'log_metric', arguments: { name: 'weight_kg' } }] },
+      'What value should I log for your weight?',
     );
 
-    const res = await service.chat('log my metrics');
+    const res = await service.chat('log my weight');
 
     expect(fitnessRepo.metrics).toHaveLength(0);
     const toolTurn = llm.calls[1].messages.at(-1)!;
-    expect(JSON.parse(toolTurn.content).error).toMatch(/at least one/);
-    expect(res.answer).toBe('I need at least one metric — weight, calories or protein.');
+    expect(JSON.parse(toolTurn.content).error).toMatch(/value/);
+    expect(res.answer).toBe('What value should I log for your weight?');
   });
 
   it('stops a tool-call-forever model after the round cap', async () => {
@@ -257,7 +307,7 @@ describe('ChatService planner (fitness tools)', () => {
     for (let i = 0; i < 10; i++) {
       llm.queue.push({
         content: '',
-        toolCalls: [{ name: 'query_fitness', arguments: { query: 'metric_avg', metric: 'calories' } }],
+        toolCalls: [{ name: 'query_metric', arguments: { query: 'avg', name: 'calories' } }],
       });
     }
 
@@ -284,6 +334,6 @@ describe('ChatService planner (fitness tools)', () => {
     const system = llm.calls[0].messages[0].content;
     expect(system).toContain('ONLY');
     expect(system).toContain('faith/reflections/on-grace.md');
-    expect(system).toContain('do NOT call fitness tools');
+    expect(system).toContain('do NOT call these tools');
   });
 });

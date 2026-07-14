@@ -1,6 +1,6 @@
-import { asc, desc, eq, gte, inArray } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, inArray, lte, max } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { bodyMetrics, workoutSets, workouts } from '../db/schema';
+import { metricEntries, workoutSets, workouts } from '../db/schema';
 
 export const FITNESS_REPO = 'FITNESS_REPO';
 
@@ -23,13 +23,28 @@ export interface SetRow {
 /** A set joined with its workout's date (for progression/volume math). */
 export type DatedSet = SetRow & { date: string };
 
-export interface BodyMetricRow {
+export interface MetricRow {
   id: string;
+  /** Normalized lowercase snake_case, e.g. weight_kg, sleep_hours. */
+  name: string;
   /** YYYY-MM-DD */
   date: string;
-  weightKg: number | null;
-  calories: number | null;
-  proteinG: number | null;
+  value: number;
+  unit: string | null;
+}
+
+export interface NewMetric {
+  name: string;
+  date: string;
+  value: number;
+  unit: string | null;
+}
+
+/** Distinct metric name with entry count and most recent date. */
+export interface MetricNameRow {
+  name: string;
+  count: number;
+  lastDate: string;
 }
 
 export interface NewWorkoutSet {
@@ -42,13 +57,6 @@ export interface NewWorkoutExercise {
   sets: NewWorkoutSet[];
 }
 
-export interface NewBodyMetric {
-  date: string;
-  weightKg: number | null;
-  calories: number | null;
-  proteinG: number | null;
-}
-
 export type WorkoutWithSets = WorkoutRow & { sets: SetRow[] };
 
 /** Fitness store — parameterized queries only, no free-form SQL. Faked in tests. */
@@ -58,19 +66,38 @@ export interface FitnessRepo {
     notes: string | null,
     exercises: NewWorkoutExercise[],
   ): Promise<WorkoutWithSets>;
-  insertBodyMetric(metric: NewBodyMetric): Promise<BodyMetricRow>;
-  /** Rows in [since, until], both inclusive, oldest first. */
-  metricsBetween(since: string, until: string): Promise<BodyMetricRow[]>;
+  insertMetric(metric: NewMetric): Promise<MetricRow>;
+  /** Most recent entry for one (normalized) name; null when never logged. */
+  latestMetric(name: string): Promise<MetricRow | null>;
+  /** Most recent entry per distinct name, name-ordered. */
+  latestMetrics(): Promise<MetricRow[]>;
+  /** Entries for one name in [since, until] (null bound = open), oldest first. */
+  metricsBetween(
+    name: string,
+    since: string | null,
+    until: string | null,
+  ): Promise<MetricRow[]>;
+  /** Distinct metric names with counts + last logged date, name-ordered. */
+  metricNames(): Promise<MetricNameRow[]>;
+  /** All entries (optionally one name), newest first — REST listing. */
+  listMetrics(name?: string): Promise<MetricRow[]>;
   /** All sets for one exercise (already-normalized name), oldest workout first. */
   setsForExercise(exercise: string): Promise<DatedSet[]>;
   /** All sets from workouts dated >= since, oldest first. */
   setsSince(since: string): Promise<DatedSet[]>;
   /** Most recent workouts (date desc) with their sets. */
   recentWorkouts(limit: number): Promise<WorkoutWithSets[]>;
-  listMetrics(): Promise<BodyMetricRow[]>;
 }
 
 const num = (v: string | null): number | null => (v === null ? null : Number(v));
+
+const toMetricRow = (r: {
+  id: string;
+  name: string;
+  date: string;
+  value: string;
+  unit: string | null;
+}): MetricRow => ({ id: r.id, name: r.name, date: r.date, value: Number(r.value), unit: r.unit });
 
 export class DrizzleFitnessRepo implements FitnessRepo {
   constructor(private readonly db: NodePgDatabase<Record<string, unknown>>) {}
@@ -98,29 +125,77 @@ export class DrizzleFitnessRepo implements FitnessRepo {
     });
   }
 
-  async insertBodyMetric(metric: NewBodyMetric): Promise<BodyMetricRow> {
+  async insertMetric(metric: NewMetric): Promise<MetricRow> {
     const [row] = await this.db
-      .insert(bodyMetrics)
+      .insert(metricEntries)
       .values({
+        name: metric.name,
         date: metric.date,
-        weightKg: metric.weightKg === null ? null : String(metric.weightKg),
-        calories: metric.calories,
-        proteinG: metric.proteinG === null ? null : String(metric.proteinG),
+        value: String(metric.value),
+        unit: metric.unit,
       })
       .returning();
-    return { ...row, weightKg: num(row.weightKg), proteinG: num(row.proteinG) };
+    return toMetricRow(row);
   }
 
-  async metricsBetween(since: string, until: string): Promise<BodyMetricRow[]> {
+  async latestMetric(name: string): Promise<MetricRow | null> {
+    const [row] = await this.db
+      .select()
+      .from(metricEntries)
+      .where(eq(metricEntries.name, name))
+      .orderBy(desc(metricEntries.date), desc(metricEntries.created))
+      .limit(1);
+    return row ? toMetricRow(row) : null;
+  }
+
+  async latestMetrics(): Promise<MetricRow[]> {
+    const rows = await this.db
+      .selectDistinctOn([metricEntries.name])
+      .from(metricEntries)
+      .orderBy(
+        asc(metricEntries.name),
+        desc(metricEntries.date),
+        desc(metricEntries.created),
+      );
+    return rows.map(toMetricRow);
+  }
+
+  async metricsBetween(
+    name: string,
+    since: string | null,
+    until: string | null,
+  ): Promise<MetricRow[]> {
+    const conditions = [eq(metricEntries.name, name)];
+    if (since !== null) conditions.push(gte(metricEntries.date, since));
+    if (until !== null) conditions.push(lte(metricEntries.date, until));
     const rows = await this.db
       .select()
-      .from(bodyMetrics)
-      .where(gte(bodyMetrics.date, since))
-      .orderBy(asc(bodyMetrics.date));
-    // `until` filtered here to keep the query one-sided-index friendly and trivially safe
-    return rows
-      .filter((r) => r.date <= until)
-      .map((r) => ({ ...r, weightKg: num(r.weightKg), proteinG: num(r.proteinG) }));
+      .from(metricEntries)
+      .where(and(...conditions))
+      .orderBy(asc(metricEntries.date), asc(metricEntries.created));
+    return rows.map(toMetricRow);
+  }
+
+  async metricNames(): Promise<MetricNameRow[]> {
+    const rows = await this.db
+      .select({
+        name: metricEntries.name,
+        count: count(),
+        lastDate: max(metricEntries.date),
+      })
+      .from(metricEntries)
+      .groupBy(metricEntries.name)
+      .orderBy(asc(metricEntries.name));
+    return rows.map((r) => ({ name: r.name, count: r.count, lastDate: r.lastDate! }));
+  }
+
+  async listMetrics(name?: string): Promise<MetricRow[]> {
+    const rows = await this.db
+      .select()
+      .from(metricEntries)
+      .where(name === undefined ? undefined : eq(metricEntries.name, name))
+      .orderBy(desc(metricEntries.date), desc(metricEntries.created));
+    return rows.map(toMetricRow);
   }
 
   async setsForExercise(exercise: string): Promise<DatedSet[]> {
@@ -166,13 +241,5 @@ export class DrizzleFitnessRepo implements FitnessRepo {
         .filter((s) => s.workoutId === w.id)
         .map((s) => ({ ...s, weightKg: num(s.weightKg) })),
     }));
-  }
-
-  async listMetrics(): Promise<BodyMetricRow[]> {
-    const rows = await this.db
-      .select()
-      .from(bodyMetrics)
-      .orderBy(desc(bodyMetrics.date));
-    return rows.map((r) => ({ ...r, weightKg: num(r.weightKg), proteinG: num(r.proteinG) }));
   }
 }

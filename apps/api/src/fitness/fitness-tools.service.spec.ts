@@ -2,20 +2,22 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   addDays,
   FitnessToolsService,
+  normalizeMetricName,
   weekStart,
 } from './fitness-tools.service';
 import type {
-  BodyMetricRow,
   DatedSet,
   FitnessRepo,
-  NewBodyMetric,
+  MetricNameRow,
+  MetricRow,
+  NewMetric,
   NewWorkoutExercise,
   WorkoutWithSets,
 } from './fitness.repo';
 
 class FakeFitnessRepo implements FitnessRepo {
   workouts: WorkoutWithSets[] = [];
-  metrics: BodyMetricRow[] = [];
+  metrics: MetricRow[] = [];
   private seq = 0;
 
   async createWorkout(
@@ -39,16 +41,60 @@ class FakeFitnessRepo implements FitnessRepo {
     return w;
   }
 
-  async insertBodyMetric(m: NewBodyMetric): Promise<BodyMetricRow> {
+  async insertMetric(m: NewMetric): Promise<MetricRow> {
     const row = { id: `m-${++this.seq}`, ...m };
     this.metrics.push(row);
     return row;
   }
 
-  async metricsBetween(since: string, until: string): Promise<BodyMetricRow[]> {
+  async latestMetric(name: string): Promise<MetricRow | null> {
+    return (
+      [...this.metrics]
+        .filter((m) => m.name === name)
+        .sort((a, b) => b.date.localeCompare(a.date))[0] ?? null
+    );
+  }
+
+  async latestMetrics(): Promise<MetricRow[]> {
+    const names = [...new Set(this.metrics.map((m) => m.name))].sort();
+    const rows: MetricRow[] = [];
+    for (const n of names) rows.push((await this.latestMetric(n))!);
+    return rows;
+  }
+
+  async metricsBetween(
+    name: string,
+    since: string | null,
+    until: string | null,
+  ): Promise<MetricRow[]> {
     return this.metrics
-      .filter((m) => m.date >= since && m.date <= until)
+      .filter(
+        (m) =>
+          m.name === name &&
+          (since === null || m.date >= since) &&
+          (until === null || m.date <= until),
+      )
       .sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  async metricNames(): Promise<MetricNameRow[]> {
+    const byName = new Map<string, MetricRow[]>();
+    for (const m of this.metrics) {
+      byName.set(m.name, [...(byName.get(m.name) ?? []), m]);
+    }
+    return [...byName.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, rows]) => ({
+        name,
+        count: rows.length,
+        lastDate: rows.map((r) => r.date).sort().at(-1)!,
+      }));
+  }
+
+  async listMetrics(name?: string): Promise<MetricRow[]> {
+    return this.metrics
+      .filter((m) => name === undefined || m.name === name)
+      .sort((a, b) => b.date.localeCompare(a.date));
   }
 
   async setsForExercise(exercise: string): Promise<DatedSet[]> {
@@ -61,10 +107,6 @@ class FakeFitnessRepo implements FitnessRepo {
 
   async recentWorkouts(limit: number): Promise<WorkoutWithSets[]> {
     return [...this.workouts].sort((a, b) => b.date.localeCompare(a.date)).slice(0, limit);
-  }
-
-  async listMetrics(): Promise<BodyMetricRow[]> {
-    return [...this.metrics].sort((a, b) => b.date.localeCompare(a.date));
   }
 
   private allSets(): DatedSet[] {
@@ -135,90 +177,124 @@ describe('log_workout', () => {
   });
 });
 
-describe('log_body_metric', () => {
-  it('persists a metric row with defaulted date', async () => {
-    const res = await run('log_body_metric', { weight_kg: 82.4, protein_g: 160 });
-    expect(res).toMatchObject({
+describe('normalizeMetricName', () => {
+  it('lowercases and snake_cases freeform names', () => {
+    expect(normalizeMetricName('weight_kg')).toBe('weight_kg');
+    expect(normalizeMetricName('Weight (kg)')).toBe('weight_kg');
+    expect(normalizeMetricName('  Sleep Hours ')).toBe('sleep_hours');
+    expect(normalizeMetricName('resting-HR')).toBe('resting_hr');
+    expect(normalizeMetricName('Height_CM')).toBe('height_cm');
+  });
+});
+
+describe('log_metric', () => {
+  it('persists a normalized entry with defaulted date', async () => {
+    const res = await run('log_metric', { name: 'Height (cm)', value: 180 });
+    expect(res).toEqual({
       logged: true,
+      metric_id: 'm-1',
+      name: 'height_cm',
+      value: 180,
+      unit: null,
       date: TODAY,
-      weight_kg: 82.4,
-      calories: null,
-      protein_g: 160,
     });
-    expect(repo.metrics).toHaveLength(1);
+    expect(repo.metrics).toEqual([
+      { id: 'm-1', name: 'height_cm', date: TODAY, value: 180, unit: null },
+    ]);
   });
 
-  it('rejects all-null metrics and bad values as {error}', async () => {
-    expect((await run('log_body_metric', {})).error).toMatch(/at least one/);
-    expect((await run('log_body_metric', { date: '2026-07-10' })).error).toMatch(
-      /at least one/,
+  it('keeps unit and explicit date; accepts fractional values', async () => {
+    const res = await run('log_metric', {
+      name: 'sleep_hours',
+      value: 6.5,
+      unit: 'hours',
+      date: '2026-07-12',
+    });
+    expect(res).toMatchObject({
+      name: 'sleep_hours',
+      value: 6.5,
+      unit: 'hours',
+      date: '2026-07-12',
+    });
+  });
+
+  it('rejects missing name/value, non-numeric value, bad date as {error}', async () => {
+    expect((await run('log_metric', { value: 80 })).error).toMatch(/name/);
+    expect((await run('log_metric', { name: '!!!', value: 80 })).error).toMatch(/name/);
+    expect((await run('log_metric', { name: 'weight_kg' })).error).toMatch(/value/);
+    expect((await run('log_metric', { name: 'weight_kg', value: 'heavy' })).error).toMatch(
+      /value/,
     );
-    expect((await run('log_body_metric', { calories: 12.5 })).error).toBeDefined();
-    expect((await run('log_body_metric', { weight_kg: -3 })).error).toBeDefined();
+    expect(
+      (await run('log_metric', { name: 'weight_kg', value: 80, date: 'yesterday' })).error,
+    ).toMatch(/date/);
     expect(repo.metrics).toHaveLength(0);
   });
 });
 
-describe('query_fitness latest_metrics', () => {
-  it('returns most recent non-null value + date per metric', async () => {
+describe('query_metric latest', () => {
+  it('returns the most recent entry for one name (normalized before lookup)', async () => {
     repo.metrics.push(
-      { id: 'm1', date: '2026-07-10', weightKg: 84, calories: 2400, proteinG: null },
-      { id: 'm2', date: '2026-07-12', weightKg: 83, calories: null, proteinG: 160 },
-      { id: 'm3', date: '2026-07-13', weightKg: null, calories: null, proteinG: 150 },
+      { id: 'm1', name: 'weight_kg', date: '2026-07-10', value: 84, unit: null },
+      { id: 'm2', name: 'weight_kg', date: '2026-07-12', value: 83, unit: null },
+      { id: 'm3', name: 'height_cm', date: '2026-07-01', value: 180, unit: null },
     );
-    const res = await run('query_fitness', { query: 'latest_metrics' });
+    const res = await run('query_metric', { query: 'latest', name: 'Weight (kg)' });
     expect(res).toEqual({
-      query: 'latest_metrics',
-      weight_kg: { value: 83, date: '2026-07-12' },
-      calories: { value: 2400, date: '2026-07-10' },
-      protein_g: { value: 150, date: '2026-07-13' },
+      query: 'latest',
+      name: 'weight_kg',
+      entry: { value: 83, unit: null, date: '2026-07-12' },
     });
   });
 
-  it('all-null shape when nothing logged', async () => {
-    const res = await run('query_fitness', { query: 'latest_metrics' });
+  it('null entry when the name was never logged', async () => {
+    const res = await run('query_metric', { query: 'latest', name: 'mood' });
+    expect(res).toEqual({ query: 'latest', name: 'mood', entry: null });
+  });
+
+  it('without name: latest entry of EVERY metric', async () => {
+    repo.metrics.push(
+      { id: 'm1', name: 'weight_kg', date: '2026-07-10', value: 84, unit: null },
+      { id: 'm2', name: 'weight_kg', date: '2026-07-12', value: 83, unit: null },
+      { id: 'm3', name: 'sleep_hours', date: '2026-07-13', value: 6.5, unit: 'hours' },
+    );
+    const res = await run('query_metric', { query: 'latest' });
     expect(res).toEqual({
-      query: 'latest_metrics',
-      weight_kg: null,
-      calories: null,
-      protein_g: null,
+      query: 'latest',
+      metrics: [
+        { name: 'sleep_hours', value: 6.5, unit: 'hours', date: '2026-07-13' },
+        { name: 'weight_kg', value: 83, unit: null, date: '2026-07-12' },
+      ],
     });
+  });
+
+  it('empty metrics array when nothing logged at all', async () => {
+    const res = await run('query_metric', { query: 'latest' });
+    expect(res).toEqual({ query: 'latest', metrics: [] });
   });
 });
 
-describe('query_fitness metric_avg', () => {
-  beforeEach(async () => {
-    for (const [date, protein_g] of [
-      ['2026-07-07', 150], // Tue this week
-      ['2026-07-10', 170],
-      ['2026-07-13', 160],
-      ['2026-06-01', 999], // outside window
-    ] as const) {
-      await repo.insertBodyMetric({
-        date,
-        weightKg: null,
-        calories: null,
-        proteinG: protein_g,
-      });
-    }
-    await repo.insertBodyMetric({
-      date: '2026-07-12',
-      weightKg: 82.4,
-      calories: 2500,
-      proteinG: null, // must be ignored by protein avg
-    });
+describe('query_metric avg', () => {
+  beforeEach(() => {
+    repo.metrics.push(
+      { id: 'm1', name: 'protein_g', date: '2026-07-07', value: 150, unit: null },
+      { id: 'm2', name: 'protein_g', date: '2026-07-10', value: 170, unit: null },
+      { id: 'm3', name: 'protein_g', date: '2026-07-13', value: 160, unit: null },
+      { id: 'm4', name: 'protein_g', date: '2026-06-01', value: 999, unit: null }, // outside window
+      { id: 'm5', name: 'weight_kg', date: '2026-07-12', value: 82.4, unit: null }, // other metric
+    );
   });
 
-  it('averages only non-null values inside [since, until]', async () => {
-    const res = await run('query_fitness', {
-      query: 'metric_avg',
-      metric: 'protein_g',
+  it('averages only the named metric inside [since, until]', async () => {
+    const res = await run('query_metric', {
+      query: 'avg',
+      name: 'protein_g',
       since: '2026-07-07',
       until: '2026-07-13',
     });
     expect(res).toEqual({
-      query: 'metric_avg',
-      metric: 'protein_g',
+      query: 'avg',
+      name: 'protein_g',
       since: '2026-07-07',
       until: '2026-07-13',
       count: 3,
@@ -227,35 +303,96 @@ describe('query_fitness metric_avg', () => {
   });
 
   it('defaults window to the last 7 days ending today', async () => {
-    const res = await run('query_fitness', { query: 'metric_avg', metric: 'protein_g' });
+    const res = await run('query_metric', { query: 'avg', name: 'protein_g' });
     expect(res.since).toBe(addDays(TODAY, -6));
     expect(res.until).toBe(TODAY);
     expect(res.count).toBe(3);
     expect(res.avg).toBe(160);
   });
 
-  it('null avg on empty window; rejects bad metric and inverted window', async () => {
-    const empty = await run('query_fitness', {
-      query: 'metric_avg',
-      metric: 'calories',
+  it('null avg on empty window; requires name; rejects inverted window', async () => {
+    const empty = await run('query_metric', {
+      query: 'avg',
+      name: 'calories',
       since: '2020-01-01',
       until: '2020-01-07',
     });
     expect(empty).toMatchObject({ count: 0, avg: null });
 
-    expect(
-      (await run('query_fitness', { query: 'metric_avg', metric: 'steps' })).error,
-    ).toMatch(/metric must be one of/);
+    expect((await run('query_metric', { query: 'avg' })).error).toMatch(/name/);
     expect(
       (
-        await run('query_fitness', {
-          query: 'metric_avg',
-          metric: 'calories',
+        await run('query_metric', {
+          query: 'avg',
+          name: 'protein_g',
           since: '2026-07-13',
           until: '2026-07-01',
         })
       ).error,
     ).toMatch(/since must be <= until/);
+  });
+});
+
+describe('query_metric series', () => {
+  it('returns dated values oldest-first, window + limit honored', async () => {
+    repo.metrics.push(
+      { id: 'm1', name: 'weight_kg', date: '2026-07-01', value: 85, unit: null },
+      { id: 'm2', name: 'weight_kg', date: '2026-07-07', value: 84, unit: null },
+      { id: 'm3', name: 'weight_kg', date: '2026-07-13', value: 83, unit: null },
+      { id: 'm4', name: 'mood', date: '2026-07-13', value: 7, unit: null },
+    );
+    const res = await run('query_metric', { query: 'series', name: 'weight_kg' });
+    expect(res).toEqual({
+      query: 'series',
+      name: 'weight_kg',
+      entries: [
+        { date: '2026-07-01', value: 85, unit: null },
+        { date: '2026-07-07', value: 84, unit: null },
+        { date: '2026-07-13', value: 83, unit: null },
+      ],
+    });
+
+    const windowed = await run('query_metric', {
+      query: 'series',
+      name: 'weight_kg',
+      since: '2026-07-05',
+      limit: 1,
+    });
+    expect(windowed.entries).toEqual([{ date: '2026-07-13', value: 83, unit: null }]);
+  });
+
+  it('empty entries when nothing logged; requires name', async () => {
+    const res = await run('query_metric', { query: 'series', name: 'steps' });
+    expect(res).toEqual({ query: 'series', name: 'steps', entries: [] });
+    expect((await run('query_metric', { query: 'series' })).error).toMatch(/name/);
+  });
+});
+
+describe('query_metric names', () => {
+  it('lists distinct names with counts and last date', async () => {
+    repo.metrics.push(
+      { id: 'm1', name: 'weight_kg', date: '2026-07-10', value: 84, unit: null },
+      { id: 'm2', name: 'weight_kg', date: '2026-07-12', value: 83, unit: null },
+      { id: 'm3', name: 'height_cm', date: '2026-07-01', value: 180, unit: null },
+    );
+    const res = await run('query_metric', { query: 'names' });
+    expect(res).toEqual({
+      query: 'names',
+      metrics: [
+        { name: 'height_cm', count: 1, last_date: '2026-07-01' },
+        { name: 'weight_kg', count: 2, last_date: '2026-07-12' },
+      ],
+    });
+  });
+
+  it('empty list when nothing logged; unknown query → {error}', async () => {
+    expect(await run('query_metric', { query: 'names' })).toEqual({
+      query: 'names',
+      metrics: [],
+    });
+    expect((await run('query_metric', { query: 'drop_tables' })).error).toMatch(
+      /query must be one of/,
+    );
   });
 });
 
@@ -337,8 +474,11 @@ describe('query_fitness recent_workouts + dispatch', () => {
     ]);
   });
 
-  it('unknown query and unknown tool → {error}', async () => {
-    expect((await run('query_fitness', { query: 'drop_tables' })).error).toMatch(
+  it('removed metric queries and unknown tools → {error}', async () => {
+    expect((await run('query_fitness', { query: 'latest_metrics' })).error).toMatch(
+      /query must be one of/,
+    );
+    expect((await run('query_fitness', { query: 'metric_avg' })).error).toMatch(
       /query must be one of/,
     );
     expect((await run('nuke_db', {})).error).toMatch(/unknown tool/);

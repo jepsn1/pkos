@@ -11,24 +11,18 @@ export const FITNESS_NOW = 'FITNESS_NOW';
 
 /** Appended to the chat system prompt so the planner routes fitness turns to tools.
  *  Prefer FitnessToolsService.routingPrompt(), which prepends today's date. */
-export const FITNESS_ROUTING = `You also have fitness tools for the user's personal training log.
+export const FITNESS_ROUTING = `You also have tools for the user's personal training log and metric log.
 Routing rules:
 - When the user reports a workout, exercises, sets or reps, call log_workout. "AxB" means A separate sets of B reps each ("bench 5x5 at 80kg" = five set entries, each {reps: 5, weight_kg: 80}).
-- When the user reports body weight, calories eaten, or protein eaten, call log_body_metric.
-- When the user asks about their training or nutrition data (current/latest weight or metrics, averages, progression, weekly volume, recent workouts), call query_fitness and answer strictly from the tool result.
-- For every other question — notes, knowledge, theology, general topics — do NOT call fitness tools; answer from the knowledge items above as instructed.
+- When the user states ANY personal numeric measurement — body weight, height, calories eaten, protein, sleep hours, resting heart rate, mood score, blood pressure, anything with a number — call log_metric. Reuse an existing metric name when one fits; bake the unit into the name (weight_kg, height_cm, sleep_hours, protein_g) or pass it as unit.
+- When the user asks about their logged numbers (current/latest weight or height, averages, trends over time, "what metrics do you have on me"), call query_metric and answer strictly from the tool result. When the result is empty, say plainly that nothing is logged yet and offer to log it if they tell you — NEVER tell the user to "log in".
+- When the user asks about training data (exercise progression, weekly volume, recent workouts), call query_fitness.
+- For every other question — notes, knowledge, theology, general topics — do NOT call these tools; answer from the knowledge items above as instructed.
 After a logging tool succeeds, confirm briefly what was saved. Numbers in answers must come from tool results, never invented.`;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const METRICS = ['weight_kg', 'calories', 'protein_g'] as const;
-type MetricName = (typeof METRICS)[number];
-const QUERIES = [
-  'latest_metrics',
-  'metric_avg',
-  'exercise_progression',
-  'weekly_volume',
-  'recent_workouts',
-] as const;
+const METRIC_QUERIES = ['latest', 'avg', 'series', 'names'] as const;
+const QUERIES = ['exercise_progression', 'weekly_volume', 'recent_workouts'] as const;
 
 export const FITNESS_TOOLS: LlmTool[] = [
   {
@@ -74,35 +68,56 @@ export const FITNESS_TOOLS: LlmTool[] = [
     },
   },
   {
-    name: 'log_body_metric',
+    name: 'log_metric',
     description:
-      'Save daily body metrics: body weight (kg), calories eaten, and/or protein eaten (grams). At least one metric is required.',
+      'Save one dated numeric measurement about the user: body weight, height, calories, protein, sleep hours, resting heart rate, mood — any metric. Reuse an existing metric name when one fits (check query_metric names if unsure) and include the unit in the name (weight_kg, height_cm, sleep_hours, protein_g) or in the unit field.',
     parameters: {
       type: 'object',
+      required: ['name', 'value'],
       properties: {
+        name: {
+          type: 'string',
+          description:
+            'Metric name, lowercase snake_case with the unit baked in, e.g. weight_kg, height_cm, sleep_hours, resting_hr, mood.',
+        },
+        value: { type: 'number', description: 'The measured value.' },
+        unit: {
+          type: 'string',
+          description: 'Unit if not already in the name, e.g. "kg", "hours".',
+        },
         date: { type: 'string', description: 'Date YYYY-MM-DD. Omit for today.' },
-        weight_kg: { type: 'number', description: 'Body weight in kg.' },
-        calories: { type: 'integer', description: 'Calories eaten.' },
-        protein_g: { type: 'number', description: 'Protein eaten in grams.' },
+      },
+    },
+  },
+  {
+    name: 'query_metric',
+    description:
+      "Query the user's metric log. query=latest: most recent value for one metric name, or for EVERY metric when name is omitted — use for \"what metrics do you have on me\". query=avg: average of one metric between since and until (default: trailing 7 days). query=series: dated values of one metric over time. query=names: all metric names with entry counts and last logged date.",
+    parameters: {
+      type: 'object',
+      required: ['query'],
+      properties: {
+        query: { type: 'string', enum: [...METRIC_QUERIES] },
+        name: {
+          type: 'string',
+          description: 'Metric name, e.g. weight_kg. Required for avg and series.',
+        },
+        since: { type: 'string', description: 'YYYY-MM-DD window start (inclusive).' },
+        until: { type: 'string', description: 'YYYY-MM-DD window end (inclusive).' },
+        limit: { type: 'integer', minimum: 1, maximum: 50 },
       },
     },
   },
   {
     name: 'query_fitness',
     description:
-      'Query the training log. query=latest_metrics: most recent recorded value + date per body metric — use for "current weight" etc. query=metric_avg: average of a body metric (weight_kg | calories | protein_g) between since and until. query=exercise_progression: per-workout top weight/reps/volume for one exercise. query=weekly_volume: training volume per week since a date. query=recent_workouts: latest workouts with sets.',
+      'Query the training log. query=exercise_progression: per-workout top weight/reps/volume for one exercise. query=weekly_volume: training volume per week since a date. query=recent_workouts: latest workouts with sets.',
     parameters: {
       type: 'object',
       required: ['query'],
       properties: {
         query: { type: 'string', enum: [...QUERIES] },
-        metric: {
-          type: 'string',
-          enum: [...METRICS],
-          description: 'metric_avg only.',
-        },
         since: { type: 'string', description: 'YYYY-MM-DD window start (inclusive).' },
-        until: { type: 'string', description: 'YYYY-MM-DD window end (inclusive).' },
         exercise: { type: 'string', description: 'exercise_progression only.' },
         limit: { type: 'integer', minimum: 1, maximum: 50 },
       },
@@ -136,8 +151,10 @@ export class FitnessToolsService {
       switch (call.name) {
         case 'log_workout':
           return JSON.stringify(await this.logWorkout(args));
-        case 'log_body_metric':
-          return JSON.stringify(await this.logBodyMetric(args));
+        case 'log_metric':
+          return JSON.stringify(await this.logMetric(args));
+        case 'query_metric':
+          return JSON.stringify(await this.queryMetric(args));
         case 'query_fitness':
           return JSON.stringify(await this.queryFitness(args));
         default:
@@ -186,34 +203,98 @@ export class FitnessToolsService {
     };
   }
 
-  async logBodyMetric(args: Args) {
+  async logMetric(args: Args) {
+    const name = normalizeMetricName(requiredString(args.name, 'name'));
+    const value = finiteNumber(args.value, 'value');
+    const unit = optionalString(args.unit, 'unit');
     const date = this.parseDate(args.date, 'date');
-    const weightKg = optionalPositiveNumber(args.weight_kg, 'weight_kg');
-    const calories = args.calories == null ? null : positiveInt(args.calories, 'calories');
-    const proteinG = optionalPositiveNumber(args.protein_g, 'protein_g');
-    if (weightKg === null && calories === null && proteinG === null) {
-      throw new ToolArgError(
-        'at least one of weight_kg, calories, protein_g is required',
-      );
-    }
-    const row = await this.repo.insertBodyMetric({ date, weightKg, calories, proteinG });
+    const row = await this.repo.insertMetric({ name, date, value, unit });
     return {
       logged: true,
       metric_id: row.id,
+      name: row.name,
+      value: row.value,
+      unit: row.unit,
       date: row.date,
-      weight_kg: row.weightKg,
-      calories: row.calories,
-      protein_g: row.proteinG,
+    };
+  }
+
+  async queryMetric(args: Args) {
+    const query = requiredString(args.query, 'query');
+    switch (query) {
+      case 'latest':
+        return this.latestMetric(args);
+      case 'avg':
+        return this.metricAvg(args);
+      case 'series':
+        return this.metricSeries(args);
+      case 'names':
+        return this.metricNames();
+      default:
+        throw new ToolArgError(`query must be one of: ${METRIC_QUERIES.join(', ')}`);
+    }
+  }
+
+  /** Latest entry for one name, or the latest entry of EVERY name when omitted. */
+  private async latestMetric(args: Args) {
+    if (args.name != null && args.name !== '') {
+      const name = normalizeMetricName(requiredString(args.name, 'name'));
+      const row = await this.repo.latestMetric(name);
+      return {
+        query: 'latest',
+        name,
+        entry: row ? { value: row.value, unit: row.unit, date: row.date } : null,
+      };
+    }
+    const rows = await this.repo.latestMetrics();
+    return {
+      query: 'latest',
+      metrics: rows.map((r) => ({
+        name: r.name,
+        value: r.value,
+        unit: r.unit,
+        date: r.date,
+      })),
+    };
+  }
+
+  private async metricAvg(args: Args) {
+    const name = normalizeMetricName(requiredString(args.name, 'name'));
+    const until = this.parseDate(args.until, 'until');
+    const since = args.since == null ? addDays(until, -6) : this.parseDate(args.since, 'since');
+    if (since > until) throw new ToolArgError('since must be <= until');
+    const rows = await this.repo.metricsBetween(name, since, until);
+    const avg =
+      rows.length === 0
+        ? null
+        : round1(rows.reduce((a, r) => a + r.value, 0) / rows.length);
+    return { query: 'avg', name, since, until, count: rows.length, avg };
+  }
+
+  private async metricSeries(args: Args) {
+    const name = normalizeMetricName(requiredString(args.name, 'name'));
+    const since = args.since == null ? null : this.parseDate(args.since, 'since');
+    const until = args.until == null ? null : this.parseDate(args.until, 'until');
+    const limit = optionalLimit(args.limit, 50);
+    const rows = await this.repo.metricsBetween(name, since, until);
+    return {
+      query: 'series',
+      name,
+      entries: rows.slice(-limit).map((r) => ({ date: r.date, value: r.value, unit: r.unit })),
+    };
+  }
+
+  private async metricNames() {
+    const rows = await this.repo.metricNames();
+    return {
+      query: 'names',
+      metrics: rows.map((r) => ({ name: r.name, count: r.count, last_date: r.lastDate })),
     };
   }
 
   async queryFitness(args: Args) {
     const query = requiredString(args.query, 'query');
     switch (query) {
-      case 'latest_metrics':
-        return this.latestMetrics();
-      case 'metric_avg':
-        return this.metricAvg(args);
       case 'exercise_progression':
         return this.exerciseProgression(args);
       case 'weekly_volume':
@@ -223,41 +304,6 @@ export class FitnessToolsService {
       default:
         throw new ToolArgError(`query must be one of: ${QUERIES.join(', ')}`);
     }
-  }
-
-  /** Most recent non-null value per metric (rows come back date-desc). */
-  private async latestMetrics() {
-    const rows = await this.repo.listMetrics();
-    const latest = (key: 'weightKg' | 'calories' | 'proteinG') => {
-      const row = rows.find((r) => r[key] !== null);
-      return row ? { value: row[key], date: row.date } : null;
-    };
-    return {
-      query: 'latest_metrics',
-      weight_kg: latest('weightKg'),
-      calories: latest('calories'),
-      protein_g: latest('proteinG'),
-    };
-  }
-
-  private async metricAvg(args: Args) {
-    const metric = requiredString(args.metric, 'metric') as MetricName;
-    if (!METRICS.includes(metric)) {
-      throw new ToolArgError(`metric must be one of: ${METRICS.join(', ')}`);
-    }
-    const until = this.parseDate(args.until, 'until');
-    const since = args.since == null ? addDays(until, -6) : this.parseDate(args.since, 'since');
-    if (since > until) throw new ToolArgError('since must be <= until');
-    const rows = await this.repo.metricsBetween(since, until);
-    const key = { weight_kg: 'weightKg', calories: 'calories', protein_g: 'proteinG' }[
-      metric
-    ] as 'weightKg' | 'calories' | 'proteinG';
-    const values = rows.map((r) => r[key]).filter((v): v is number => v !== null);
-    const avg =
-      values.length === 0
-        ? null
-        : round1(values.reduce((a, b) => a + b, 0) / values.length);
-    return { query: 'metric_avg', metric, since, until, count: values.length, avg };
   }
 
   private async exerciseProgression(args: Args) {
@@ -338,6 +384,19 @@ export class FitnessToolsService {
   }
 }
 
+/**
+ * Freeform model-supplied metric name → canonical lowercase snake_case:
+ * "Weight (kg)" → weight_kg, "Sleep Hours" → sleep_hours, "resting-HR" → resting_hr.
+ */
+export function normalizeMetricName(raw: string): string {
+  const name = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  if (!name) throw new ToolArgError('name must contain letters or digits');
+  return name;
+}
+
 function asObject(v: unknown, field: string): Args {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) {
     throw new ToolArgError(`${field} must be an object`);
@@ -362,6 +421,14 @@ function positiveInt(v: unknown, field: string): number {
   const n = typeof v === 'string' ? Number(v) : v;
   if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) {
     throw new ToolArgError(`${field} must be a positive integer`);
+  }
+  return n;
+}
+
+function finiteNumber(v: unknown, field: string): number {
+  const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+  if (typeof n !== 'number' || !Number.isFinite(n)) {
+    throw new ToolArgError(`${field} must be a number`);
   }
   return n;
 }
