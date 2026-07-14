@@ -20,6 +20,7 @@ Routing rules:
 - When the user asks about training data (exercise progression, weekly volume, recent workouts), call query_fitness.
 - For every other question — notes, knowledge, theology, general topics — do NOT call these tools; answer from the knowledge items above as instructed.
 Never answer with an announcement like "let me look that up" — emit the tool call itself instead, then answer from its result.
+A single message may contain SEVERAL loggable things (e.g. a workout AND sleep AND protein): log every one of them — emit multiple tool calls, in one round or consecutive rounds — before answering. Only confirm what a tool result proves was saved; confirming something you did not log is the worst possible failure.
 After a logging tool succeeds, confirm briefly what was saved. Numbers in answers must come from tool results, never invented.`;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

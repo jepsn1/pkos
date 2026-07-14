@@ -340,7 +340,7 @@ describe('ChatService planner (fitness tools)', () => {
     }
 
     await service.chat('average calories?');
-    expect(llm.calls.length).toBe(5); // initial + MAX_TOOL_ROUNDS
+    expect(llm.calls.length).toBe(9); // initial + MAX_TOOL_ROUNDS
   });
 
   it('knowledge questions keep the vector path: no tool round, citations intact', async () => {

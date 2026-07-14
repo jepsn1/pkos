@@ -44,7 +44,7 @@ export interface ChatResult {
 
 const TOP_K = 5;
 /** Cap on tool rounds per turn so a looping model can't spin forever. */
-const MAX_TOOL_ROUNDS = 4;
+const MAX_TOOL_ROUNDS = 8;
 /** Cosine cutoff below which retrieval counts as "nothing relevant" (nomic-embed:
  *  on-topic queries score ~0.6–0.75 here, nonsense tops out ~0.44). */
 const DEFAULT_MIN_SCORE = 0.5;
