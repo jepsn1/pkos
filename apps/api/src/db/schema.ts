@@ -224,3 +224,39 @@ export const goals = pgTable('goals', {
   done: boolean('done').notNull().default(false),
   created: timestamp('created', { withTimezone: true }).notNull().defaultNow(),
 });
+
+// AI organization suggestions (slice 12, issue #12). Generated on ingest, user
+// decides — never auto-applied. Rows are ephemeral review state (not rebuilt
+// by rebuild-index); accepted effects land in the vault, the canonical store.
+export const SUGGESTION_KINDS = ['tag', 'link', 'duplicate', 'summary'] as const;
+export type SuggestionKind = (typeof SUGGESTION_KINDS)[number];
+export const suggestionKind = pgEnum('suggestion_kind', SUGGESTION_KINDS);
+
+export const SUGGESTION_STATUSES = ['pending', 'accepted', 'rejected'] as const;
+export type SuggestionStatus = (typeof SUGGESTION_STATUSES)[number];
+export const suggestionStatus = pgEnum('suggestion_status', SUGGESTION_STATUSES);
+
+/**
+ * Per-kind payload shapes:
+ * tag → {tag}; link → {toPath, type}; duplicate → {duplicateOfPath, similarity};
+ * summary → {summary}.
+ */
+export const suggestions = pgTable(
+  'suggestions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    itemId: uuid('item_id')
+      .notNull()
+      .references(() => knowledgeItems.id, { onDelete: 'cascade' }),
+    kind: suggestionKind('kind').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+    status: suggestionStatus('status').notNull().default('pending'),
+    created: timestamp('created', { withTimezone: true }).notNull().defaultNow(),
+    /** Set when status leaves pending. */
+    resolved: timestamp('resolved', { withTimezone: true }),
+  },
+  (t) => [
+    index('suggestions_item_id_idx').on(t.itemId),
+    index('suggestions_status_idx').on(t.status),
+  ],
+);

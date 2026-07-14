@@ -6,6 +6,7 @@ import { HealthModule } from './health/health.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
 import { OpenAiCompatModule } from './openai-compat/openai-compat.module';
 import { SermonsModule } from './sermons/sermons.module';
+import { SuggestionsModule } from './suggestions/suggestions.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { SermonsModule } from './sermons/sermons.module';
     GraphModule,
     SermonsModule,
     FitnessModule,
+    SuggestionsModule,
   ],
 })
 export class AppModule {}

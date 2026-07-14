@@ -35,6 +35,13 @@ const DEFAULT_SEARCH_LIMIT = 10;
 
 @Injectable()
 export class KnowledgeService {
+  /**
+   * Fire-and-forget observer called after a NEW item is ingested (not on
+   * rebuild). Slice 12's SuggesterService registers itself here; registrants
+   * must swallow their own errors — an ingest never fails on observer failure.
+   */
+  onIngested?: (item: KnowledgeItem) => void;
+
   constructor(
     private readonly vault: VaultService,
     @Inject(KNOWLEDGE_REPO) private readonly repo: KnowledgeRepo,
@@ -59,7 +66,9 @@ export class KnowledgeService {
       body: req.markdown,
     };
     const relPath = await this.vault.writeNote(req.folder ?? DEFAULT_FOLDER, note);
-    return this.index(relPath, note);
+    const item = await this.index(relPath, note);
+    this.onIngested?.(item);
+    return item;
   }
 
   async list(): Promise<KnowledgeItem[]> {
