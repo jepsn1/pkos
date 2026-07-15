@@ -57,11 +57,15 @@ export function toReply(reply: string | LlmReply): LlmReply {
 
 // qwen3:14b on the 6900 XT does ~50 tok/s, but long answers + cold model load add up
 // (and other agents may queue on the shared ollama — override via env when needed).
-/** Some models (qwen3:30b-a3b on ollama 0.31.x) ignore think:false and leak
- *  reasoning into content untagged. think:true routes reasoning into the
- *  separate `thinking` field (which we drop), keeping content clean — so
- *  LLM_THINK=true is the correct setting for those models. */
-const LLM_THINK = process.env.LLM_THINK === 'true';
+/** Thinking control. Booleans for qwen3-style models (NOTE: qwen3:30b-a3b on
+ *  ollama 0.31.x ignores think:false and leaks reasoning into content — use
+ *  true there; reasoning then lands in the separate `thinking` field).
+ *  gpt-oss takes effort LEVELS instead: LLM_THINK=low|medium|high. */
+function parseThink(raw: string | undefined): boolean | string {
+  if (raw === 'low' || raw === 'medium' || raw === 'high') return raw;
+  return raw === 'true';
+}
+const LLM_THINK = parseThink(process.env.LLM_THINK);
 /** Context window + per-round generation cap. Defaults sized for qwen3:30b-a3b
  *  on 16GB VRAM: 4096 (ollama default) overflows on our system prompt + tools +
  *  thinking and sends the model into 19k-token runaway loops; the cap makes any
