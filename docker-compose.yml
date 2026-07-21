@@ -109,6 +109,19 @@ services:
       - /srv/data/ollama:/root/.ollama
     networks: [web]
 
+  # Self-hosted metasearch backing the api's web_search tool. Queries leave the
+  # box via SearXNG to public engines (result content is from the internet);
+  # self-hosting keeps there being no third-party API key / account. INTERNAL
+  # ONLY — no published port, reached by the api as http://pkos-searxng:8080
+  # (SEARXNG_URL in .env). Config + secret in /srv/data/searxng/settings.yml.
+  searxng:
+    image: searxng/searxng:latest
+    container_name: pkos-searxng
+    restart: unless-stopped
+    volumes:
+      - /srv/data/searxng:/etc/searxng
+    networks: [web]
+
   # DB table inspector (tailscale-only). Login: server infra-postgres, user pkos
   # + pkos db password from .env DATABASE_URL (or postgres superuser for other dbs,
   # password in /srv/infra/compose/.env).
