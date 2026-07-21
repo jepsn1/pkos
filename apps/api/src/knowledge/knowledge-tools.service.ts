@@ -6,7 +6,7 @@ import type { KnowledgeItem } from './knowledge.repo';
 /** Appended to the chat system prompt so the planner routes knowledge turns here. */
 export const KNOWLEDGE_ROUTING = `You also have tools over the user's knowledge vault:
 - save_note (WRITE): when the user asks you to remember, save, store or note down a fact, preference, idea or piece of information that is NOT a numeric measurement, call it with a short title and a clean markdown body. Do NOT use it for numeric measurements (those go to log_metric) or ordinary questions.
-  FOLDER: always choose the folder that best fits the content and pass it as \`folder\` — do not just accept the default. Options: sermons (sermon notes, a pastor's talk, church teaching), faith (Bible study, theology, reflections, devotionals — nest as faith/bible-study, faith/reflections, faith/theology when it fits), books (book notes/summaries), fitness (training notes), diet (nutrition/food), programming (code/tech), articles (essays or general writing — the fallback only). A pastor's/sermon notes go in sermons, NOT articles. After saving, tell the user which folder you used so they can correct it.
+  FOLDER: always choose the folder that best fits the content and pass it as \`folder\` — do not just accept the default. Options: faith (Bible study, theology, reflections, devotionals, sermons — nest as faith/bible-study, faith/reflections, faith/theology, faith/sermons when it fits), books (book notes/summaries), fitness (training notes), diet (nutrition/food), programming (code/tech), articles (essays or general writing — the fallback only). A pastor's/sermon/church-teaching notes go in faith/sermons, NOT articles or a top-level sermons folder. After saving, tell the user which folder you used so they can correct it.
 - read_note (RECALL): when the user asks you to read back, recall, show or quote a SPECIFIC saved note ("read me my note on X", "what did I write about Y"), call it with the note's title (or exact path). It returns the note's FULL markdown so you can quote or summarise it. If it returns candidates instead of a note, ask the user which one; if it finds nothing, say so plainly.
   CONTEXT: if the user refers to their note about something already under discussion — e.g. right after you talked about a book or topic they ask "what does my own note say?", "and my note?", "what do MY notes say about it" — this is read_note for THAT specific item: use the title of the thing just discussed. Do NOT list the whole vault.
 - list_notes (BROWSE): only for genuine inventory/browse requests — "what notes do I have", "list my faith notes", "what do we have in fitness". Pass the folder they named (faith, fitness, articles, books, programming) as the folder argument, and ALWAYS call it fresh (never answer a "what do I have / list" question from earlier turns — the folder changes between questions). If it returns count 0, say plainly that that folder has no notes yet; do NOT repeat a list from a previous answer. This is NOT for "what does my note say about <the current topic>" — that is read_note.
@@ -26,7 +26,7 @@ const KNOWLEDGE_TOOLS: LlmTool[] = [
         folder: {
           type: 'string',
           description:
-            'Best-fit vault folder: sermons, faith (or faith/bible-study, faith/reflections, faith/theology), books, fitness, diet, programming, or articles as the fallback. Omit only when nothing fits.',
+            'Best-fit vault folder: faith (or faith/bible-study, faith/reflections, faith/theology, faith/sermons), books, fitness, diet, programming, or articles as the fallback. Omit only when nothing fits.',
         },
         tags: {
           type: 'array',
@@ -67,7 +67,7 @@ const KNOWLEDGE_TOOLS: LlmTool[] = [
   {
     name: 'move_note',
     description:
-      'Relocate a saved note to a different vault folder — use when a note was filed in the wrong place. Identify it by title (preferred) or exact path, and give the target folder (e.g. sermons, faith/reflections). Returns the new path. If the title is ambiguous it returns candidates instead of moving.',
+      'Relocate a saved note to a different vault folder — use when a note was filed in the wrong place. Identify it by title (preferred) or exact path, and give the target folder (e.g. faith/sermons, faith/reflections). Returns the new path. If the title is ambiguous it returns candidates instead of moving.',
     parameters: {
       type: 'object',
       required: ['folder'],
@@ -79,7 +79,7 @@ const KNOWLEDGE_TOOLS: LlmTool[] = [
         },
         folder: {
           type: 'string',
-          description: 'Target folder, e.g. sermons or faith/reflections.',
+          description: 'Target folder, e.g. faith/sermons or faith/reflections.',
         },
       },
     },
@@ -281,7 +281,7 @@ function requiredFolder(v: unknown): string {
   const folder = optionalFolder(v);
   if (!folder) throw new ToolArgError('provide a target folder to move the note to');
   if (!FOLDER_RE.test(folder)) {
-    throw new ToolArgError(`invalid folder "${folder}" — use lowercase, e.g. sermons or faith/reflections`);
+    throw new ToolArgError(`invalid folder "${folder}" — use lowercase, e.g. faith/sermons or faith/reflections`);
   }
   return folder;
 }
