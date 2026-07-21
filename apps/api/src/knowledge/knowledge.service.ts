@@ -83,6 +83,15 @@ export class KnowledgeService {
     return this.repo.list();
   }
 
+  /** Relocate a note to another vault folder. Returns the old and new paths. */
+  async move(id: string, targetFolder: string): Promise<{ from: string; to: string; title: string }> {
+    const item = await this.repo.getById(id);
+    if (!item) throw new NotFoundException(`no knowledge item ${id}`);
+    const to = await this.vault.moveNote(item.path, targetFolder);
+    await this.repo.move(id, to);
+    return { from: item.path, to, title: item.title };
+  }
+
   /** Metadata row + canonical body read from the vault. */
   async get(id: string): Promise<KnowledgeItem & { body: string }> {
     const item = await this.repo.getById(id);

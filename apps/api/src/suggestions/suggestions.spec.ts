@@ -35,6 +35,12 @@ class FakeKnowledgeRepo implements KnowledgeRepo {
     return this.rows.find((r) => r.id === id) ?? null;
   }
 
+  async move(id: string, path: string): Promise<KnowledgeItem | null> {
+    const row = this.rows.find((r) => r.id === id);
+    if (row) row.path = path;
+    return row ?? null;
+  }
+
   async upsert(item: NewKnowledgeItem): Promise<KnowledgeItem> {
     const { embedding: _e, ...rest } = item;
     const row: KnowledgeItem = { ...rest, id: `k-${++this.seq}`, updated: new Date() };

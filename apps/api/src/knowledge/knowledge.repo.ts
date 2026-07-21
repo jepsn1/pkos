@@ -34,6 +34,8 @@ export interface KnowledgeRepo {
   upsert(item: NewKnowledgeItem): Promise<KnowledgeItem>;
   list(): Promise<KnowledgeItem[]>;
   getById(id: string): Promise<KnowledgeItem | null>;
+  /** Repoint a note's vault path (used when a note is moved between folders). */
+  move(id: string, path: string): Promise<KnowledgeItem | null>;
   search(embedding: number[], limit: number): Promise<SearchHit[]>;
   wipe(): Promise<void>;
 }
@@ -67,6 +69,15 @@ export class DrizzleKnowledgeRepo implements KnowledgeRepo {
 
   async list(): Promise<KnowledgeItem[]> {
     return this.db.select(ITEM_COLUMNS).from(knowledgeItems).orderBy(knowledgeItems.path);
+  }
+
+  async move(id: string, path: string): Promise<KnowledgeItem | null> {
+    const [row] = await this.db
+      .update(knowledgeItems)
+      .set({ path, updated: sql`now()` })
+      .where(eq(knowledgeItems.id, id))
+      .returning(ITEM_COLUMNS);
+    return row ?? null;
   }
 
   async getById(id: string): Promise<KnowledgeItem | null> {

@@ -51,6 +51,14 @@ class FakeRepo implements KnowledgeRepo {
     return rest;
   }
 
+  async move(id: string, path: string) {
+    const row = this.rows.find((r) => r.id === id);
+    if (!row) return null;
+    row.path = path;
+    const { embedding, ...rest } = row;
+    return rest;
+  }
+
   async search(embedding: number[], limit: number): Promise<SearchHit[]> {
     return this.rows
       .map((r) => ({

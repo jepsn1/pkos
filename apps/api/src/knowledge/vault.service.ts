@@ -75,6 +75,31 @@ export class VaultService {
     return relPath;
   }
 
+  /**
+   * Move a note into `targetFolder` (git mv + commit), keeping its filename.
+   * De-duplicates the name in the target. Returns the new vault-relative path;
+   * returns the old path unchanged when it is already in the target folder.
+   */
+  async moveNote(oldRelPath: string, targetFolder: string): Promise<string> {
+    if (!ALLOWED_FOLDER.test(targetFolder) || targetFolder.includes('..')) {
+      throw new BadRequestException(`invalid folder: ${targetFolder}`);
+    }
+    if (!(await this.exists(oldRelPath))) {
+      throw new BadRequestException(`no such vault file: ${oldRelPath}`);
+    }
+    const base = path.posix.basename(oldRelPath);
+    let newRelPath = path.posix.join(targetFolder, base);
+    if (newRelPath === oldRelPath) return oldRelPath;
+    await fs.mkdir(path.join(this.root, targetFolder), { recursive: true });
+    const stem = base.replace(/\.md$/, '');
+    for (let n = 2; await this.exists(newRelPath); n++) {
+      newRelPath = path.posix.join(targetFolder, `${stem}-${n}.md`);
+    }
+    await this.git(['mv', oldRelPath, newRelPath]);
+    await this.git(['commit', '-m', `move ${oldRelPath} -> ${newRelPath}`]);
+    return newRelPath;
+  }
+
   /** Rewrite an existing note in place and commit. Throws when the file is missing. */
   async updateNote(relPath: string, note: Note, message: string): Promise<void> {
     if (!(await this.exists(relPath))) {

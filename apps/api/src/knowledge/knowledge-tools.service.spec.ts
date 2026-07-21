@@ -60,6 +60,16 @@ class FakeKnowledgeService {
     this.searched.push(query);
     return this.searchHits.slice(0, limit);
   }
+
+  moved: Array<{ id: string; folder: string }> = [];
+  async move(id: string, folder: string): Promise<{ from: string; to: string; title: string }> {
+    const it = this.items.find((i) => i.id === id);
+    if (!it) throw new Error(`no item ${id}`);
+    this.moved.push({ id, folder });
+    const from = it.path;
+    it.path = `${folder}/${from.split('/').pop()}`;
+    return { from, to: it.path, title: it.title };
+  }
 }
 
 let knowledge: FakeKnowledgeService;
@@ -280,5 +290,53 @@ describe('list_notes', () => {
 
   it('rejects a traversal folder', async () => {
     expect((await run('list_notes', { folder: '../etc' })).error).toBeDefined();
+  });
+});
+
+describe('move_note', () => {
+  it('moves a note identified by exact title to the target folder', async () => {
+    knowledge.items = [
+      item({ id: 'p', path: 'articles/pastor-notes.md', title: 'Pastor Notes' }),
+    ];
+    const res = await run('move_note', { title: 'Pastor Notes', folder: 'sermons' });
+    expect(res.moved).toBe(true);
+    expect(res.from).toBe('articles/pastor-notes.md');
+    expect(res.to).toBe('sermons/pastor-notes.md');
+    expect(knowledge.moved).toEqual([{ id: 'p', folder: 'sermons' }]);
+  });
+
+  it('moves a note identified by exact path', async () => {
+    knowledge.items = [item({ id: 'g', path: 'articles/on-grace.md', title: 'On Grace' })];
+    const res = await run('move_note', { path: 'articles/on-grace.md', folder: 'faith/reflections' });
+    expect(res.moved).toBe(true);
+    expect(res.to).toBe('faith/reflections/on-grace.md');
+  });
+
+  it('ambiguous title → returns candidates, does not move', async () => {
+    knowledge.items = [
+      item({ id: 'a', path: 'articles/note.md', title: 'Notes' }),
+      item({ id: 'b', path: 'faith/note.md', title: 'Notes' }),
+    ];
+    const res = await run('move_note', { title: 'Notes', folder: 'sermons' });
+    expect(res.moved).toBeUndefined();
+    expect(res.found).toBe(false);
+    expect(knowledge.moved).toEqual([]);
+  });
+
+  it('missing folder → {error}', async () => {
+    knowledge.items = [item({ id: 'p', path: 'articles/x.md', title: 'X' })];
+    expect((await run('move_note', { title: 'X' })).error).toMatch(/folder/);
+  });
+
+  it('rejects a traversal / invalid folder', async () => {
+    knowledge.items = [item({ id: 'p', path: 'articles/x.md', title: 'X' })];
+    expect((await run('move_note', { title: 'X', folder: '../etc' })).error).toBeDefined();
+    expect(knowledge.moved).toEqual([]);
+  });
+
+  it('unknown note → found:false, no move', async () => {
+    const res = await run('move_note', { title: 'nonexistent', folder: 'sermons' });
+    expect(res.found).toBe(false);
+    expect(knowledge.moved).toEqual([]);
   });
 });

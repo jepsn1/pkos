@@ -86,6 +86,7 @@ function knowledgeRepoWith(hits: SearchHit[]): KnowledgeRepo {
     upsert: rejectUnused,
     list: rejectUnused,
     getById: rejectUnused,
+    move: rejectUnused,
     wipe: rejectUnused,
   };
 }

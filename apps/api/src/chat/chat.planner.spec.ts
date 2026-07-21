@@ -164,6 +164,7 @@ function knowledgeRepoWith(hits: SearchHit[]): KnowledgeRepo {
     upsert: rejectUnused,
     list: rejectUnused,
     getById: rejectUnused,
+    move: rejectUnused,
     wipe: rejectUnused,
   };
 }
@@ -402,6 +403,7 @@ describe('ChatService planner (knowledge tools)', () => {
       'save_note',
       'read_note',
       'list_notes',
+      'move_note',
     ]);
     // both routing prompts in the system slot
     const system = llm.calls[0].messages[0].content;

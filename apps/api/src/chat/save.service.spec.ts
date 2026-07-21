@@ -97,6 +97,12 @@ class FakeKnowledgeRepo implements KnowledgeRepo {
     return this.items.find((i) => i.id === id) ?? null;
   }
 
+  async move(id: string, path: string): Promise<KnowledgeItem | null> {
+    const item = this.items.find((i) => i.id === id);
+    if (item) item.path = path;
+    return item ?? null;
+  }
+
   async list(): Promise<KnowledgeItem[]> {
     return this.items;
   }

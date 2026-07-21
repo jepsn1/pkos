@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import type { LlmTool, LlmToolCall } from '../chat/llm.provider';
 import { KnowledgeService } from './knowledge.service';
+import type { KnowledgeItem } from './knowledge.repo';
 
 /** Appended to the chat system prompt so the planner routes knowledge turns here. */
 export const KNOWLEDGE_ROUTING = `You also have tools over the user's knowledge vault:
-- save_note (WRITE): when the user asks you to remember, save, store or note down a fact, preference, idea or piece of information that is NOT a numeric measurement, call it with a short title and a clean markdown body. Do NOT use it for numeric measurements (those go to log_metric) or ordinary questions. After it succeeds, confirm briefly and mention the saved path.
+- save_note (WRITE): when the user asks you to remember, save, store or note down a fact, preference, idea or piece of information that is NOT a numeric measurement, call it with a short title and a clean markdown body. Do NOT use it for numeric measurements (those go to log_metric) or ordinary questions.
+  FOLDER: always choose the folder that best fits the content and pass it as \`folder\` — do not just accept the default. Options: sermons (sermon notes, a pastor's talk, church teaching), faith (Bible study, theology, reflections, devotionals — nest as faith/bible-study, faith/reflections, faith/theology when it fits), books (book notes/summaries), fitness (training notes), diet (nutrition/food), programming (code/tech), articles (essays or general writing — the fallback only). A pastor's/sermon notes go in sermons, NOT articles. After saving, tell the user which folder you used so they can correct it.
 - read_note (RECALL): when the user asks you to read back, recall, show or quote a SPECIFIC saved note ("read me my note on X", "what did I write about Y"), call it with the note's title (or exact path). It returns the note's FULL markdown so you can quote or summarise it. If it returns candidates instead of a note, ask the user which one; if it finds nothing, say so plainly.
   CONTEXT: if the user refers to their note about something already under discussion — e.g. right after you talked about a book or topic they ask "what does my own note say?", "and my note?", "what do MY notes say about it" — this is read_note for THAT specific item: use the title of the thing just discussed. Do NOT list the whole vault.
 - list_notes (BROWSE): only for genuine inventory/browse requests — "what notes do I have", "list my faith notes", "what do we have in fitness". Pass the folder they named (faith, fitness, articles, books, programming) as the folder argument, and ALWAYS call it fresh (never answer a "what do I have / list" question from earlier turns — the folder changes between questions). If it returns count 0, say plainly that that folder has no notes yet; do NOT repeat a list from a previous answer. This is NOT for "what does my note say about <the current topic>" — that is read_note.
@@ -23,7 +25,8 @@ const KNOWLEDGE_TOOLS: LlmTool[] = [
         markdown: { type: 'string', description: 'Note body, markdown.' },
         folder: {
           type: 'string',
-          description: 'Vault folder, e.g. articles or faith. Omit for the default.',
+          description:
+            'Best-fit vault folder: sermons, faith (or faith/bible-study, faith/reflections, faith/theology), books, fitness, diet, programming, or articles as the fallback. Omit only when nothing fits.',
         },
         tags: {
           type: 'array',
@@ -58,6 +61,26 @@ const KNOWLEDGE_TOOLS: LlmTool[] = [
       properties: {
         folder: { type: 'string', description: 'Vault folder prefix, e.g. faith. Omit for all.' },
         tag: { type: 'string', description: 'Only notes carrying this tag.' },
+      },
+    },
+  },
+  {
+    name: 'move_note',
+    description:
+      'Relocate a saved note to a different vault folder — use when a note was filed in the wrong place. Identify it by title (preferred) or exact path, and give the target folder (e.g. sermons, faith/reflections). Returns the new path. If the title is ambiguous it returns candidates instead of moving.',
+    parameters: {
+      type: 'object',
+      required: ['folder'],
+      properties: {
+        title: { type: 'string', description: 'Title of the note to move (case-insensitive).' },
+        path: {
+          type: 'string',
+          description: 'Exact vault path of the note. Use instead of title when known.',
+        },
+        folder: {
+          type: 'string',
+          description: 'Target folder, e.g. sermons or faith/reflections.',
+        },
       },
     },
   },
@@ -99,6 +122,8 @@ export class KnowledgeToolsService {
           return JSON.stringify(await this.readNote(args));
         case 'list_notes':
           return JSON.stringify(await this.listNotes(args));
+        case 'move_note':
+          return JSON.stringify(await this.moveNote(args));
         default:
           return JSON.stringify({ error: `unknown tool: ${call.name}` });
       }
@@ -126,28 +151,32 @@ export class KnowledgeToolsService {
   }
 
   /**
-   * Recall one note in full. Resolution order:
-   *   path (exact) → title (exact, case-insensitive) → semantic fallback.
-   * Never auto-reads a fuzzy guess: an ambiguous or fuzzy-only match returns
-   * candidates for the assistant to disambiguate rather than a note body.
+   * Resolve one note from {path|title}. Order:
+   *   path (exact) → title (exact, case-insensitive) → confident semantic.
+   * Returns {item} when unambiguous; otherwise a found:false payload with
+   * candidates for the assistant to disambiguate — never guesses a fuzzy match.
+   * Shared by read_note and move_note so both resolve identically.
    */
-  private async readNote(args: Args) {
+  private async resolve(
+    args: Args,
+  ): Promise<{ item: KnowledgeItem } | { found: false; candidates: unknown[]; message: string }> {
     const path = optionalString(args.path, 'path');
     const title = optionalString(args.title, 'title');
     if (!path && !title) {
-      throw new ToolArgError('provide a note title or path to read');
+      throw new ToolArgError('provide a note title or path');
     }
     const items = await this.knowledge.list();
 
     if (path) {
       const hit = items.find((i) => i.path === path);
-      if (!hit) return { found: false, candidates: [], message: `no note at path "${path}"` };
-      return this.body(hit.id);
+      return hit
+        ? { item: hit }
+        : { found: false, candidates: [], message: `no note at path "${path}"` };
     }
 
     const wanted = title!.trim().toLowerCase();
     const exact = items.filter((i) => i.title.trim().toLowerCase() === wanted);
-    if (exact.length === 1) return this.body(exact[0].id);
+    if (exact.length === 1) return { item: exact[0] };
     if (exact.length > 1) {
       return {
         found: false,
@@ -156,7 +185,7 @@ export class KnowledgeToolsService {
       };
     }
 
-    // No exact title — fall back to semantics. Auto-read a confident single match
+    // No exact title — fall back to semantics. Accept a confident single match
     // (high score + clear gap over #2); otherwise offer candidates to disambiguate.
     const hits = (await this.knowledge.search(title!, CANDIDATE_LIMIT)).filter(
       (h) => h.type === 'knowledge',
@@ -167,13 +196,30 @@ export class KnowledgeToolsService {
     const top = hits[0];
     const clearGap = hits.length === 1 || top.score - hits[1].score >= READ_NOTE_MARGIN;
     if (top.score >= READ_NOTE_AUTOREAD_SCORE && clearGap) {
-      return this.body(top.id);
+      const item = items.find((i) => i.path === top.path);
+      if (item) return { item };
     }
     return {
       found: false,
       candidates: hits.map((h) => ({ title: h.title, path: h.path })),
       message: `no exact title match for "${title}" — closest notes offered as candidates`,
     };
+  }
+
+  /** Recall one note in full (see resolve for how the note is identified). */
+  private async readNote(args: Args) {
+    const resolved = await this.resolve(args);
+    if (!('item' in resolved)) return resolved;
+    return this.body(resolved.item.id);
+  }
+
+  /** Relocate a note to another folder (see resolve for identification). */
+  private async moveNote(args: Args) {
+    const folder = requiredFolder(args.folder);
+    const resolved = await this.resolve(args);
+    if (!('item' in resolved)) return resolved;
+    const moved = await this.knowledge.move(resolved.item.id, folder);
+    return { moved: true, ...moved };
   }
 
   private async body(id: string) {
@@ -226,6 +272,18 @@ function optionalFolder(v: unknown): string | null {
     throw new ToolArgError('folder must be a relative vault path like "articles"');
   }
   return clean;
+}
+
+// Mirrors the vault's own folder rule so a bad target is reported as {error}
+// instead of crashing the tool loop with a BadRequestException.
+const FOLDER_RE = /^[a-z0-9][a-z0-9/_-]*$/;
+function requiredFolder(v: unknown): string {
+  const folder = optionalFolder(v);
+  if (!folder) throw new ToolArgError('provide a target folder to move the note to');
+  if (!FOLDER_RE.test(folder)) {
+    throw new ToolArgError(`invalid folder "${folder}" — use lowercase, e.g. sermons or faith/reflections`);
+  }
+  return folder;
 }
 
 function optionalTags(v: unknown): string[] | null {

@@ -84,6 +84,7 @@ function knowledgeRepoWith(hits: SearchHit[]): KnowledgeRepo {
     upsert: () => Promise.reject(new Error('unused')),
     list: () => Promise.reject(new Error('unused')),
     getById: () => Promise.reject(new Error('unused')),
+    move: () => Promise.reject(new Error('unused')),
     wipe: () => Promise.reject(new Error('unused')),
   };
 }

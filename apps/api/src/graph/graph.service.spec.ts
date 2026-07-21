@@ -99,6 +99,12 @@ class FakeKnowledgeRepo implements KnowledgeRepo {
     return this.rows.find((r) => r.id === id) ?? null;
   }
 
+  async move(id: string, path: string) {
+    const row = this.rows.find((r) => r.id === id);
+    if (row) row.path = path;
+    return row ?? null;
+  }
+
   upsert = () => Promise.reject(new Error('unused'));
   search = () => Promise.reject(new Error('unused'));
   wipe = () => Promise.reject(new Error('unused'));
