@@ -203,6 +203,28 @@ describe('read_note', () => {
     expect(knowledge.searched).toEqual(['unmerited favor']);
   });
 
+  it('confident single semantic hit → auto-reads it in full', async () => {
+    knowledge.items = [item({ id: 'g', path: 'faith/on-grace.md', title: 'On Grace' })];
+    knowledge.searchHits = [
+      { type: 'knowledge', id: 'g', path: 'faith/on-grace.md', title: 'On Grace', summary: null, score: 0.82 },
+    ];
+    const res = await run('read_note', { title: 'note about grace' });
+    expect(res.found).toBe(true);
+    expect(res.path).toBe('faith/on-grace.md');
+    expect(res.markdown).toBe('body of On Grace');
+  });
+
+  it('strong top but close runner-up → offers candidates, does not guess', async () => {
+    knowledge.items = [item({ id: 'g', path: 'faith/on-grace.md', title: 'On Grace' })];
+    knowledge.searchHits = [
+      { type: 'knowledge', id: 'g', path: 'faith/on-grace.md', title: 'On Grace', summary: null, score: 0.82 },
+      { type: 'knowledge', id: 'm', path: 'faith/on-mercy.md', title: 'On Mercy', summary: null, score: 0.8 },
+    ];
+    const res = await run('read_note', { title: 'grace and mercy' });
+    expect(res.found).toBe(false);
+    expect(res.candidates).toHaveLength(2);
+  });
+
   it('nothing matches → found:false with empty candidates', async () => {
     const res = await run('read_note', { title: 'quantum chromodynamics' });
     expect(res).toEqual({

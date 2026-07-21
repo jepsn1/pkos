@@ -65,6 +65,11 @@ const KNOWLEDGE_TOOLS: LlmTool[] = [
 /** How many notes list_notes returns at most, and how many recall candidates we offer. */
 const LIST_LIMIT = 100;
 const CANDIDATE_LIMIT = 5;
+// read_note semantic fallback: auto-read the top hit when it's clearly THE note
+// (high cosine + a clear gap over the runner-up), else return candidates. Stops
+// "read my note about grace" bouncing candidates when it's obviously "On Grace".
+const READ_NOTE_AUTOREAD_SCORE = 0.7;
+const READ_NOTE_MARGIN = 0.08;
 
 /** Bad tool arguments — reported back to the model as {error}, never thrown out. */
 class ToolArgError extends Error {}
@@ -150,12 +155,18 @@ export class KnowledgeToolsService {
       };
     }
 
-    // No exact title — offer the closest semantic matches, don't pick one.
+    // No exact title — fall back to semantics. Auto-read a confident single match
+    // (high score + clear gap over #2); otherwise offer candidates to disambiguate.
     const hits = (await this.knowledge.search(title!, CANDIDATE_LIMIT)).filter(
       (h) => h.type === 'knowledge',
     );
     if (hits.length === 0) {
       return { found: false, candidates: [], message: `no note found matching "${title}"` };
+    }
+    const top = hits[0];
+    const clearGap = hits.length === 1 || top.score - hits[1].score >= READ_NOTE_MARGIN;
+    if (top.score >= READ_NOTE_AUTOREAD_SCORE && clearGap) {
+      return this.body(top.id);
     }
     return {
       found: false,
