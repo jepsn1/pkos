@@ -78,6 +78,9 @@ services:
       - /dev/dri
     ports:
       - "127.0.0.1:11434:11434"   # native dev access only
+      # Tailscale-only: raw ollama (no auth) reachable from your tailnet devices.
+      # Same trust level as api/webui. NEVER 0.0.0.0 (published ports bypass UFW).
+      - "${TAILSCALE_IP:?set TAILSCALE_IP in .env}:11434:11434"
     volumes:
       - /srv/data/ollama:/root/.ollama
     networks: [web]
