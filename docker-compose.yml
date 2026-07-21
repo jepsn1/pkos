@@ -44,6 +44,9 @@ services:
       OPENAI_API_BASE_URL: http://pkos-api:3002/v1
       OPENAI_API_KEY: ${OPENAI_COMPAT_API_KEY:?set OPENAI_COMPAT_API_KEY in .env}
       ENABLE_OLLAMA_API: "false"
+      # Pin voice-mode STT language — unset = whisper auto-detects per clip and
+      # flip-flops en/da on short audio. Change to "da" if you speak Danish to it.
+      WHISPER_LANGUAGE: "en"
     ports:
       # Tailscale-only, same rule as the api port
       - "${TAILSCALE_IP:?set TAILSCALE_IP in .env}:8081:8080"
