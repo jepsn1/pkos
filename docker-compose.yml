@@ -47,6 +47,9 @@ services:
       # Pin voice-mode STT language — unset = whisper auto-detects per clip and
       # flip-flops en/da on short audio. Change to "da" if you speak Danish to it.
       WHISPER_LANGUAGE: "en"
+      # Fixed JWT signing key — the image defaults it to empty and regenerates a
+      # random one each start, logging everyone out on every restart. Pin it.
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?set WEBUI_SECRET_KEY in .env}
     ports:
       # Tailscale-only, same rule as the api port
       - "${TAILSCALE_IP:?set TAILSCALE_IP in .env}:8081:8080"
