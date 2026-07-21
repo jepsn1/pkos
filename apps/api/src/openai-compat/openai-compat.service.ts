@@ -116,10 +116,12 @@ export class OpenAiCompatService {
     ): CompletionChunk => ({ ...base, choices: [{ index: 0, delta, finish_reason: finish }] });
 
     send(chunk({ role: 'assistant', content: '' }));
-    // Reasoning models produce minutes of hidden thinking (incl. during tool
-    // rounds) before the first answer token. Stream it inside a <think> block —
-    // Open WebUI renders that as a live collapsible "Thinking…" section — and
-    // close the block when the real answer starts.
+    // Voice-first defaults: DON'T stream the <think> block or the Sources footer.
+    // Both get read aloud by webui TTS (reasoning + "path (zero point five one)"),
+    // wasting seconds per turn. Reasoning still runs server-side (routing quality
+    // kept) — it's just not forwarded. Re-enable for a text-only client via env.
+    const streamThinking = process.env.COMPAT_STREAM_THINKING === 'true';
+    const emitFooter = process.env.COMPAT_SOURCES_FOOTER === 'true';
     let thinkOpen = false;
     const closeThink = () => {
       if (thinkOpen) {
@@ -135,17 +137,21 @@ export class OpenAiCompatService {
           closeThink();
           send(chunk({ content: token }));
         },
-        (thought) => {
-          if (!thinkOpen) {
-            send(chunk({ content: '<think>' }));
-            thinkOpen = true;
-          }
-          send(chunk({ content: thought }));
-        },
+        streamThinking
+          ? (thought) => {
+              if (!thinkOpen) {
+                send(chunk({ content: '<think>' }));
+                thinkOpen = true;
+              }
+              send(chunk({ content: thought }));
+            }
+          : undefined,
       );
       closeThink();
-      const footer = sourcesFooter(citations);
-      if (footer) send(chunk({ content: footer }));
+      if (emitFooter) {
+        const footer = sourcesFooter(citations);
+        if (footer) send(chunk({ content: footer }));
+      }
     } catch (err) {
       closeThink();
       send(chunk({ content: `\n\n[pkos error: ${err instanceof Error ? err.message : err}]` }));

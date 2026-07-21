@@ -62,16 +62,15 @@ describe('OpenAiCompatController SSE', () => {
     expect(headers['cache-control']).toBe('no-cache');
     expect(writes.every((w) => w.startsWith('data: ') && w.endsWith('\n\n'))).toBe(true);
     expect(writes.at(-1)).toBe('data: [DONE]\n\n');
-    // role, 2 tokens, footer, stop, [DONE]
-    expect(writes).toHaveLength(6);
+    // role, 2 tokens, stop, [DONE] — no footer delta by default (voice-first)
+    expect(writes).toHaveLength(5);
     const deltas = writes
       .slice(0, -1)
       .map((w) => JSON.parse(w.slice('data: '.length)).choices[0].delta);
     expect(deltas[0].role).toBe('assistant');
     expect(deltas[1].content).toBe('Grace');
     expect(deltas[2].content).toBe(' abounds.');
-    expect(deltas[3].content).toContain('**Sources:**');
-    expect(deltas[4]).toEqual({});
+    expect(deltas[3]).toEqual({});
   });
 
   it('stream:true with a mid-stream error still terminates with [DONE]', async () => {

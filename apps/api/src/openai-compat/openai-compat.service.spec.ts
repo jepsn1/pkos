@@ -139,7 +139,7 @@ describe('streamCompletion (real token streaming)', () => {
     return chunks;
   }
 
-  it('emits role chunk → one delta per token → sources footer delta → stop', async () => {
+  it('emits role chunk → one delta per token → stop (no footer by default)', async () => {
     const { service } = serviceWith(
       [GRACE_CITATION],
       'Grace is unmerited favor.',
@@ -151,18 +151,29 @@ describe('streamCompletion (real token streaming)', () => {
     expect(chunks.every((c) => c.id === chunks[0].id)).toBe(true);
     expect(chunks[0].choices[0].delta.role).toBe('assistant');
     const deltas = chunks.slice(1, -1).map((c) => c.choices[0].delta.content);
-    expect(deltas).toEqual([
-      'Grace',
-      ' is',
-      ' unmerited',
-      ' favor.',
-      '\n\n---\n**Sources:**\n- `faith/reflections/on-grace.md` — On Grace (0.72)',
-    ]);
-    // everything before the stop chunk is finish_reason:null
+    // Voice-first default: tokens only, no spoken Sources footer.
+    expect(deltas).toEqual(['Grace', ' is', ' unmerited', ' favor.']);
     expect(chunks.slice(0, -1).every((c) => c.choices[0].finish_reason === null)).toBe(true);
     const stop = chunks.at(-1)!;
     expect(stop.choices[0].finish_reason).toBe('stop');
     expect(stop.choices[0].delta).toEqual({});
+  });
+
+  it('appends the Sources footer delta when COMPAT_SOURCES_FOOTER=true', async () => {
+    process.env.COMPAT_SOURCES_FOOTER = 'true';
+    try {
+      const { service } = serviceWith([GRACE_CITATION], 'Grace is unmerited favor.', [
+        'Grace',
+        ' is unmerited favor.',
+      ]);
+      const chunks = await collect(service);
+      const deltas = chunks.slice(1, -1).map((c) => c.choices[0].delta.content);
+      expect(deltas.at(-1)).toBe(
+        '\n\n---\n**Sources:**\n- `faith/reflections/on-grace.md` — On Grace (0.72)',
+      );
+    } finally {
+      delete process.env.COMPAT_SOURCES_FOOTER;
+    }
   });
 
   it('omits the footer delta when there are no citations', async () => {
