@@ -47,6 +47,9 @@ services:
     ports:
       # Tailscale-only, same rule as the api port
       - "${TAILSCALE_IP:?set TAILSCALE_IP in .env}:8081:8080"
+      # Also on localhost so `tailscale serve` (HTTPS at :8443) can proxy to it —
+      # gives webui a real cert so the browser unlocks the mic for voice mode.
+      - "127.0.0.1:8081:8080"
 
   # Sermon transcription: polls sermon_jobs, faster-whisper (cpu), embeds
   # chunks via ollama. Safe to restart any time — stale `processing` jobs are
