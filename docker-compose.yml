@@ -57,6 +57,15 @@ services:
       # gives webui a real cert so the browser unlocks the mic for voice mode.
       - "127.0.0.1:8081:8080"
 
+  # Local neural TTS (OpenAI-compatible) for webui voice mode. Returns audio
+  # files iOS can play — the built-in transformers TTS is broken (dataset) and
+  # browser TTS is blocked on iOS Safari. Kokoro-82M, CPU, private/on-box.
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    container_name: pkos-kokoro
+    restart: unless-stopped
+    networks: [web]   # reached by webui as http://pkos-kokoro:8880
+
   # Sermon transcription: polls sermon_jobs, faster-whisper (cpu), embeds
   # chunks via ollama. Safe to restart any time — stale `processing` jobs are
   # re-queued (STALE_PROCESSING_MIN, default 60).
