@@ -400,6 +400,8 @@ describe('ChatService planner (knowledge tools)', () => {
       'query_metric',
       'query_fitness',
       'save_note',
+      'read_note',
+      'list_notes',
     ]);
     // both routing prompts in the system slot
     const system = llm.calls[0].messages[0].content;
