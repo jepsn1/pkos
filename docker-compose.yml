@@ -62,7 +62,10 @@ services:
 
   # Local neural TTS (OpenAI-compatible) for webui voice mode. Returns audio
   # files iOS can play — the built-in transformers TTS is broken (dataset) and
-  # browser TTS is blocked on iOS Safari. Kokoro-82M, CPU, private/on-box.
+  # browser TTS is blocked on iOS Safari. Kokoro-82M, CPU (~1.4s/reply).
+  # NOTE: the -rocm image exists but defaults to CPU on gfx1030 without
+  # entrypoint/HSA_OVERRIDE tuning — not worth ~1s for the added fragility on
+  # 16GB. Revisit on a bigger/CUDA card (GPU TTS → ~0.4s).
   kokoro:
     image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
     container_name: pkos-kokoro
