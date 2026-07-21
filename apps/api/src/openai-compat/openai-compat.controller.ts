@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Res, UseGuards } from '@nestjs/common';
 import { OpenAiCompatGuard } from './openai-compat.guard';
 import {
   OpenAiCompatService,
@@ -33,6 +33,7 @@ export class OpenAiCompatController {
   }
 
   @Post('chat/completions')
+  @HttpCode(200) // OpenAI spec returns 200; Nest's POST default is 201, which strict clients (Cumbersome) reject
   async completions(@Body() body: CompletionRequest, @Res() res: Response) {
     if (body?.stream !== true) {
       res.json(await this.service.complete(body));
