@@ -75,6 +75,9 @@ export class OpenAiCompatService {
   async complete(body: CompletionRequest): Promise<CompletionResponse> {
     const { message, history } = parseMessages(body);
     const { answer, citations } = await this.chat.answer(message, history);
+    // Footer off by default (voice-first, matches the streaming path); opt in via env.
+    const content =
+      process.env.COMPAT_SOURCES_FOOTER === 'true' ? withSources(answer, citations) : answer;
     return {
       id: `chatcmpl-${randomUUID()}`,
       object: 'chat.completion',
@@ -83,7 +86,7 @@ export class OpenAiCompatService {
       choices: [
         {
           index: 0,
-          message: { role: 'assistant', content: withSources(answer, citations) },
+          message: { role: 'assistant', content },
           finish_reason: 'stop',
         },
       ],

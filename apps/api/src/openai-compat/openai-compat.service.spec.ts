@@ -83,7 +83,7 @@ describe('parseMessages (OpenAI → ChatService translation)', () => {
 });
 
 describe('complete (ChatService → OpenAI translation)', () => {
-  it('returns an OpenAI-shaped completion with citations footer', async () => {
+  it('returns an OpenAI-shaped completion, answer only (no footer by default)', async () => {
     const { service, calls } = serviceWith([GRACE_CITATION]);
     const res = await service.complete({
       model: 'pkos',
@@ -99,20 +99,23 @@ describe('complete (ChatService → OpenAI translation)', () => {
     expect(res.choices).toHaveLength(1);
     expect(res.choices[0].finish_reason).toBe('stop');
     const content = res.choices[0].message.content;
-    expect(content).toContain('Grace is unmerited favor.');
-    expect(content).toContain('**Sources:**');
-    expect(content).toContain('faith/reflections/on-grace.md');
-    expect(content).toContain('(0.72)');
+    expect(content).toBe('Grace is unmerited favor.');
+    expect(content).not.toContain('**Sources:**');
   });
 
-  it('omits the Sources footer when there are no citations', async () => {
-    const { service } = serviceWith([], 'Nothing relevant in the knowledge base.');
-    const res = await service.complete({
-      messages: [{ role: 'user', content: 'quantum basket weaving?' }],
-    });
-    expect(res.choices[0].message.content).toBe(
-      'Nothing relevant in the knowledge base.',
-    );
+  it('includes the footer when COMPAT_SOURCES_FOOTER=true', async () => {
+    process.env.COMPAT_SOURCES_FOOTER = 'true';
+    try {
+      const { service } = serviceWith([GRACE_CITATION]);
+      const res = await service.complete({
+        messages: [{ role: 'user', content: 'grace?' }],
+      });
+      const content = res.choices[0].message.content;
+      expect(content).toContain('**Sources:**');
+      expect(content).toContain('faith/reflections/on-grace.md');
+    } finally {
+      delete process.env.COMPAT_SOURCES_FOOTER;
+    }
   });
 });
 
