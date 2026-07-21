@@ -1,12 +1,34 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { KnowledgeToolsService } from './knowledge-tools.service';
-import type { IngestRequest, KnowledgeService } from './knowledge.service';
+import type {
+  IngestRequest,
+  KnowledgeService,
+  UnifiedSearchHit,
+} from './knowledge.service';
 import type { KnowledgeItem } from './knowledge.repo';
 
-/** Records ingest calls; returns a canned item echoing the request. */
+type StoredItem = KnowledgeItem & { body: string };
+
+function item(partial: Partial<StoredItem> & { id: string; path: string; title: string }): StoredItem {
+  return {
+    source: null,
+    tags: [],
+    summary: null,
+    importance: null,
+    created: '2026-07-14',
+    updated: new Date(),
+    body: `body of ${partial.title}`,
+    ...partial,
+  };
+}
+
+/** Records ingest calls, serves list/get/search from an in-memory set. */
 class FakeKnowledgeService {
   ingested: IngestRequest[] = [];
   fail: Error | null = null;
+  items: StoredItem[] = [];
+  searchHits: UnifiedSearchHit[] = [];
+  searched: string[] = [];
 
   async ingest(req: IngestRequest): Promise<KnowledgeItem> {
     if (this.fail) throw this.fail;
@@ -22,6 +44,21 @@ class FakeKnowledgeService {
       created: '2026-07-14',
       updated: new Date(),
     };
+  }
+
+  async list(): Promise<KnowledgeItem[]> {
+    return this.items.map(({ body: _body, ...rest }) => rest);
+  }
+
+  async get(id: string): Promise<StoredItem> {
+    const found = this.items.find((i) => i.id === id);
+    if (!found) throw new Error(`no knowledge item ${id}`);
+    return found;
+  }
+
+  async search(query: string, limit: number): Promise<UnifiedSearchHit[]> {
+    this.searched.push(query);
+    return this.searchHits.slice(0, limit);
   }
 }
 
@@ -108,5 +145,118 @@ describe('save_note', () => {
     await expect(
       service.execute({ name: 'save_note', arguments: { title: 'T', markdown: 'B' } }),
     ).rejects.toThrow('vault down');
+  });
+});
+
+describe('read_note', () => {
+  beforeEach(() => {
+    knowledge.items = [
+      item({ id: 'g', path: 'faith/on-grace.md', title: 'On Grace', tags: ['faith'] }),
+      item({ id: 'm', path: 'faith/on-mercy.md', title: 'On Mercy', tags: ['faith'] }),
+    ];
+  });
+
+  it('recalls full markdown by exact title (case-insensitive)', async () => {
+    const res = await run('read_note', { title: 'on grace' });
+    expect(res).toEqual({
+      found: true,
+      title: 'On Grace',
+      path: 'faith/on-grace.md',
+      tags: ['faith'],
+      markdown: 'body of On Grace',
+    });
+    // exact hit resolves without touching semantic search
+    expect(knowledge.searched).toEqual([]);
+  });
+
+  it('recalls by exact vault path', async () => {
+    const res = await run('read_note', { path: 'faith/on-mercy.md' });
+    expect(res.found).toBe(true);
+    expect(res.markdown).toBe('body of On Mercy');
+  });
+
+  it('ambiguous title → candidates, no body', async () => {
+    knowledge.items.push(item({ id: 'g2', path: 'articles/grace.md', title: 'On Grace' }));
+    const res = await run('read_note', { title: 'On Grace' });
+    expect(res.found).toBe(false);
+    expect(res.candidates.map((c: { path: string }) => c.path)).toEqual([
+      'faith/on-grace.md',
+      'articles/grace.md',
+    ]);
+    expect(knowledge.searched).toEqual([]); // ambiguity resolved before fallback
+  });
+
+  it('no exact title → offers closest semantic candidates, still found:false', async () => {
+    knowledge.searchHits = [
+      {
+        type: 'knowledge',
+        id: 'g',
+        path: 'faith/on-grace.md',
+        title: 'On Grace',
+        summary: null,
+        score: 0.6,
+      },
+    ];
+    const res = await run('read_note', { title: 'unmerited favor' });
+    expect(res.found).toBe(false);
+    expect(res.candidates).toEqual([{ title: 'On Grace', path: 'faith/on-grace.md' }]);
+    expect(knowledge.searched).toEqual(['unmerited favor']);
+  });
+
+  it('nothing matches → found:false with empty candidates', async () => {
+    const res = await run('read_note', { title: 'quantum chromodynamics' });
+    expect(res).toEqual({
+      found: false,
+      candidates: [],
+      message: 'no note found matching "quantum chromodynamics"',
+    });
+  });
+
+  it('unknown path → found:false', async () => {
+    const res = await run('read_note', { path: 'faith/nope.md' });
+    expect(res.found).toBe(false);
+    expect(res.candidates).toEqual([]);
+  });
+
+  it('neither title nor path → {error}', async () => {
+    expect((await run('read_note', {})).error).toMatch(/title or path/);
+  });
+});
+
+describe('list_notes', () => {
+  beforeEach(() => {
+    knowledge.items = [
+      item({ id: 'g', path: 'faith/on-grace.md', title: 'On Grace', tags: ['faith', 'grace'] }),
+      item({ id: 'm', path: 'faith/on-mercy.md', title: 'On Mercy', tags: ['faith'] }),
+      item({ id: 'e', path: 'articles/esv.md', title: 'ESV', tags: ['bible'], summary: 'pref' }),
+    ];
+  });
+
+  it('lists every note as title/path/tags/summary', async () => {
+    const res = await run('list_notes', {});
+    expect(res.count).toBe(3);
+    expect(res.notes).toContainEqual({
+      title: 'ESV',
+      path: 'articles/esv.md',
+      tags: ['bible'],
+      summary: 'pref',
+    });
+  });
+
+  it('filters by folder prefix', async () => {
+    const res = await run('list_notes', { folder: 'faith' });
+    expect(res.notes.map((n: { path: string }) => n.path)).toEqual([
+      'faith/on-grace.md',
+      'faith/on-mercy.md',
+    ]);
+  });
+
+  it('filters by tag', async () => {
+    const res = await run('list_notes', { tag: 'grace' });
+    expect(res.notes.map((n: { path: string }) => n.path)).toEqual(['faith/on-grace.md']);
+  });
+
+  it('rejects a traversal folder', async () => {
+    expect((await run('list_notes', { folder: '../etc' })).error).toBeDefined();
   });
 });
