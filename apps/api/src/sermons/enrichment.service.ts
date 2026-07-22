@@ -11,7 +11,9 @@ import {
   LLM_PROVIDER,
   stripThink,
   toReply,
+  type GenOptions,
   type LlmProvider,
+  type ThinkLevel,
 } from '../chat/llm.provider';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { slugify } from '../knowledge/note';
@@ -23,7 +25,8 @@ export const ENRICH_POLL_MS = 'ENRICH_POLL_MS';
 export interface Enrichment {
   title: string;
   summary: string;
-  themes: string[];
+  /** Main points, each with a heading + detailed notes (study notes, not labels). */
+  sections: { heading: string; notes: string[] }[];
   bibleReferences: string[];
   actionPoints: string[];
   keyQuotes: string[];
@@ -46,39 +49,48 @@ LIVE-INTERPRETED AUDIO: parts of this transcript may be live-interpreted, where 
 - take the quote from the FIRST sentence of the pair (the original speaker); the second is the interpreter.
 Do NOT infer the talk's overall language from the intro or from any sentence that is NOT part of a matched pair — greetings and introductions may be in a different language and are not translations. Every key_quote must be a complete, meaningful sentence, never a short repeated fragment. Write the summary, themes, and action points in English.`;
 
-const ENRICH_SYSTEM = `You analyze a sermon transcript for a personal knowledge base.
-Extract what was actually preached; never invent content that is not in the transcript.
+const ENRICH_SYSTEM = `You are a careful note-taker turning a sermon transcript into DETAILED study notes for a personal knowledge base. Capture what was actually preached — never invent content.
+
+Produce thorough NOTES, not a thin summary:
+- "sections" are the main points of the sermon, in order. For each, a short heading AND 2-5 bullet notes explaining what was actually said under it — the argument, the examples used, how it was developed — enough that someone who missed the sermon understands the point. Never one-word or one-line points.
+- "bible_references" MUST list EVERY scripture the preacher reads or cites — this is the most important field, never omit any.
+- "key_quotes" are a few complete, memorable sentences, verbatim.
 
 Respond with ONLY a JSON object, no other text:
 {
   "title": "short descriptive sermon title",
-  "summary": "2-4 sentence summary of the sermon",
-  "themes": ["main theme", "..."],
+  "summary": "2-4 sentence overview of the whole sermon",
+  "sections": [{"heading": "the point", "notes": ["detailed note about what was said", "another detail"]}],
   "bible_references": ["John 3:16", "1 Corinthians 13:4-7"],
   "action_points": ["practical application the preacher called for", "..."],
-  "key_quotes": ["short memorable quote taken verbatim from the transcript", "..."],
+  "key_quotes": ["a complete memorable sentence, verbatim", "..."],
   "tags": ["lowercase", "topic", "tags"]
 }
-Use empty arrays when a field has nothing (e.g. no Bible references in a secular speech).${BILINGUAL}`;
+Use empty arrays when a field genuinely has nothing.${BILINGUAL}`;
 
-const ENRICH_SYSTEM_GENERAL = `You analyze a video/talk transcript for a personal knowledge base.
-Extract what was actually said; never invent content that is not in the transcript.
+const ENRICH_SYSTEM_GENERAL = `You are a careful note-taker turning a video/talk transcript into DETAILED study notes for a personal knowledge base. Capture what was actually said — never invent content.
+
+Produce thorough NOTES, not a thin summary:
+- "sections" are the main points of the talk, in order. For each, a short heading AND 2-5 bullet notes explaining what was actually said under it — the argument, examples, how it developed — enough that someone who missed it understands. Never one-liners.
+- "key_quotes" are a few complete, memorable sentences, verbatim.
 
 Respond with ONLY a JSON object, no other text:
 {
   "title": "short descriptive title",
-  "summary": "2-4 sentence summary of the talk",
-  "themes": ["main topic", "..."],
+  "summary": "2-4 sentence overview of the talk",
+  "sections": [{"heading": "the point", "notes": ["detailed note", "another detail"]}],
   "bible_references": [],
   "action_points": ["concrete takeaway or thing to do", "..."],
-  "key_quotes": ["short memorable quote taken verbatim from the transcript", "..."],
+  "key_quotes": ["a complete memorable sentence, verbatim", "..."],
   "tags": ["lowercase", "topic", "tags"]
 }
-Use empty arrays when a field has nothing. Leave bible_references empty unless the speaker actually cites scripture.${BILINGUAL}`;
+Use empty arrays when a field genuinely has nothing. Leave bible_references empty unless the speaker actually cites scripture.${BILINGUAL}`;
 
-const CONDENSE_SYSTEM = `You condense one part of a long transcript.
-Write dense prose notes (no JSON) that preserve: main topics, any references or
-citations, concrete takeaways/action points, and short verbatim key quotes.
+const CONDENSE_SYSTEM = `You condense one part of a long transcript into DENSE study notes (no JSON).
+Preserve in detail: each point and HOW it was argued (examples, reasoning), EVERY
+scripture reference / citation mentioned (never drop these — they are critical),
+concrete takeaways/action points, and short verbatim key quotes. Do not shorten
+into vague labels — keep the substance so a later pass can write full notes.
 If you see a sentence immediately repeated as its near-translation in another
 language (live interpretation), collapse that PAIR to one point and quote the
 FIRST sentence of the pair (the original speaker; the second is the interpreter).
@@ -110,7 +122,18 @@ const presetFor = (style: string): StylePreset => STYLE_PRESETS[style] ?? STYLE_
 
 // Single LLM input budget (chars ≈ tokens*4). Longer transcripts get a per-piece
 // condense pass first; the enrichment prompt then runs over the joined notes.
-const DEFAULT_INPUT_MAX_CHARS = 24_000;
+// Kept well under num_ctx (8192) so the final pass has room for DETAILED output.
+const DEFAULT_INPUT_MAX_CHARS = 10_000;
+
+// Enrichment is a BACKGROUND job — quality over speed: medium reasoning (voice
+// uses low) for detailed notes that don't drop scripture refs. num_ctx MATCHES
+// LLM_NUM_CTX (8192) on purpose — a different size would force a gpt-oss reload
+// that thrashes with voice/watchdog. num_predict raised for longer notes.
+const ENRICH_THINK: ThinkLevel = process.env.ENRICH_THINK ?? 'medium';
+const ENRICH_GEN: GenOptions = {
+  numCtx: Number(process.env.ENRICH_NUM_CTX ?? 8192),
+  numPredict: Number(process.env.ENRICH_NUM_PREDICT ?? 4800),
+};
 
 /**
  * Sermon enrichment (issue #8): once the python worker marks a job `done`, turn
@@ -226,10 +249,16 @@ export class EnrichmentService implements OnApplicationBootstrap, OnModuleDestro
         : await this.condense(transcript);
     const raw = stripThink(
       toReply(
-        await this.llm.chat([
-          { role: 'system', content: system },
-          { role: 'user', content: `Transcript:\n\n${input}` },
-        ]),
+        await this.llm.chat(
+          [
+            { role: 'system', content: system },
+            { role: 'user', content: `Transcript:\n\n${input}` },
+          ],
+          undefined,
+          undefined,
+          ENRICH_THINK,
+          ENRICH_GEN,
+        ),
       ).content,
     );
     return parseEnrichment(raw);
@@ -241,13 +270,19 @@ export class EnrichmentService implements OnApplicationBootstrap, OnModuleDestro
     for (const [i, piece] of pieces.entries()) {
       const raw = stripThink(
         toReply(
-          await this.llm.chat([
-            { role: 'system', content: CONDENSE_SYSTEM },
-            {
-              role: 'user',
-              content: `Transcript part ${i + 1}/${pieces.length}:\n\n${piece}`,
-            },
-          ]),
+          await this.llm.chat(
+            [
+              { role: 'system', content: CONDENSE_SYSTEM },
+              {
+                role: 'user',
+                content: `Transcript part ${i + 1}/${pieces.length}:\n\n${piece}`,
+              },
+            ],
+            undefined,
+            undefined,
+            ENRICH_THINK,
+            ENRICH_GEN,
+          ),
         ).content,
       );
       notes.push(raw);
@@ -262,7 +297,12 @@ export function buildArticleBody(e: Enrichment, jobId: string, sourceUrl?: strin
   const bullets = (items: string[]) => items.map((s) => `- ${s}`).join('\n');
   const sections = [`## Summary\n\n${e.summary}`];
   if (sourceUrl) sections.push(`## Source\n\n[Original video](${sourceUrl})`);
-  if (e.themes.length) sections.push(`## Main Themes\n\n${bullets(e.themes)}`);
+  if (e.sections.length) {
+    const notes = e.sections
+      .map((s) => `### ${s.heading}\n\n${bullets(s.notes)}`)
+      .join('\n\n');
+    sections.push(`## Notes\n\n${notes}`);
+  }
   if (e.bibleReferences.length) {
     sections.push(`## Bible References\n\n${bullets(e.bibleReferences)}`);
   }
@@ -298,12 +338,25 @@ export function parseEnrichment(raw: string): Enrichment {
   return {
     title,
     summary,
-    themes: strings(d.themes),
+    sections: parseSections(d.sections),
     bibleReferences: strings(d.bible_references ?? d.bibleReferences),
     actionPoints: strings(d.action_points ?? d.actionPoints),
     keyQuotes: strings(d.key_quotes ?? d.keyQuotes),
     tags: strings(d.tags),
   };
+}
+
+/** Parse "sections": [{heading, notes[]}] — tolerant of a missing/loose shape. */
+function parseSections(value: unknown): { heading: string; notes: string[] }[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((s) => {
+      const o = (s ?? {}) as Record<string, unknown>;
+      const heading = typeof o.heading === 'string' ? o.heading.trim() : '';
+      const notes = strings(o.notes);
+      return { heading, notes };
+    })
+    .filter((s) => s.heading || s.notes.length);
 }
 
 /**

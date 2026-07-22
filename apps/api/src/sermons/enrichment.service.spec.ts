@@ -79,7 +79,10 @@ const fakeEmbedder: EmbeddingProvider = { embed: async () => [1, 0, 0] };
 const ENRICH_JSON = JSON.stringify({
   title: 'The Gospel of John',
   summary: 'John wrote so that we may believe Jesus is the Christ.',
-  themes: ['belief', 'eternal life'],
+  sections: [
+    { heading: 'Purpose of the Gospel', notes: ['John states his aim explicitly', 'Belief leads to life'] },
+    { heading: 'Signs as evidence', notes: ['The miracles point to identity'] },
+  ],
   bible_references: ['John 3:16', 'John 20:31', '1 Corinthians 13:4-7'],
   action_points: ['Read one chapter of John this week'],
   key_quotes: ['These are written so that you may believe.'],
@@ -155,8 +158,9 @@ describe('EnrichmentService.pollOnce', () => {
 
     const body = note!.body;
     expect(body).toContain('## Summary');
-    expect(body).toContain('## Main Themes');
-    expect(body).toContain('- belief');
+    expect(body).toContain('## Notes');
+    expect(body).toContain('### Purpose of the Gospel');
+    expect(body).toContain('- John states his aim explicitly');
     expect(body).toContain('## Bible References');
     expect(body).toContain('- John 3:16');
     expect(body).toContain('## Action Points');
@@ -281,7 +285,10 @@ describe('parseEnrichment', () => {
   it('tolerates code fences and prose around the JSON', () => {
     const e = parseEnrichment('Sure!\n```json\n' + ENRICH_JSON + '\n```\nDone.');
     expect(e.title).toBe('The Gospel of John');
-    expect(e.themes).toEqual(['belief', 'eternal life']);
+    expect(e.sections[0]).toEqual({
+      heading: 'Purpose of the Gospel',
+      notes: ['John states his aim explicitly', 'Belief leads to life'],
+    });
     expect(e.bibleReferences).toContain('John 3:16');
   });
 
@@ -340,7 +347,7 @@ describe('helpers', () => {
       {
         title: 'T',
         summary: 'S',
-        themes: [],
+        sections: [],
         bibleReferences: [],
         actionPoints: [],
         keyQuotes: [],
@@ -349,7 +356,7 @@ describe('helpers', () => {
       'job-1',
     );
     expect(body).toContain('## Summary');
-    expect(body).not.toContain('## Main Themes');
+    expect(body).not.toContain('## Notes');
     expect(body).toContain('job-1');
   });
 });

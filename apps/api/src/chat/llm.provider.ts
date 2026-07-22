@@ -36,12 +36,19 @@ export interface LlmReply {
 /** Reasoning effort: gpt-oss takes 'low'|'medium'|'high'; qwen3 takes a boolean. */
 export type ThinkLevel = boolean | string;
 
+/** Per-call generation budget override (background jobs need more than a voice reply). */
+export interface GenOptions {
+  numCtx?: number;
+  numPredict?: number;
+}
+
 export interface LlmProvider {
   chat(
     messages: LlmMessage[],
     tools?: LlmTool[],
     model?: string,
     think?: ThinkLevel,
+    gen?: GenOptions,
   ): Promise<string | LlmReply>;
   /**
    * Streaming variant: `onToken` receives content deltas as they arrive; the
@@ -184,6 +191,7 @@ export class OllamaLlmProvider implements LlmProvider {
     tools?: LlmTool[],
     model?: string,
     think?: ThinkLevel,
+    gen?: GenOptions,
   ): Promise<string | LlmReply> {
     const base = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
     model = model ?? process.env.LLM_MODEL ?? 'qwen3:14b';
@@ -195,7 +203,10 @@ export class OllamaLlmProvider implements LlmProvider {
         messages: messages.map(toOllamaMessage),
         stream: false,
         think: think ?? LLM_THINK,
-        options: { num_ctx: LLM_NUM_CTX, num_predict: LLM_NUM_PREDICT },
+        options: {
+          num_ctx: gen?.numCtx ?? LLM_NUM_CTX,
+          num_predict: gen?.numPredict ?? LLM_NUM_PREDICT,
+        },
         ...(tools?.length
           ? { tools: tools.map((t) => ({ type: 'function', function: t })) }
           : {}),
