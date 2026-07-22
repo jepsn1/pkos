@@ -10,6 +10,8 @@ export interface LlmMessage {
   toolCalls?: LlmToolCall[];
   /** Tool-result messages only: which tool produced this content. */
   toolName?: string;
+  /** User messages to a vision model: base64-encoded images (no data: prefix). */
+  images?: string[];
 }
 
 /** Tool offered to the model (ollama /api/chat wraps this as {type:'function', function}). */
@@ -315,6 +317,7 @@ function toOllamaMessage(m: LlmMessage): Record<string, unknown> {
   return {
     role: m.role,
     content: m.content,
+    ...(m.images?.length ? { images: m.images } : {}),
     ...(m.toolCalls?.length
       ? {
           tool_calls: m.toolCalls.map((c) => ({

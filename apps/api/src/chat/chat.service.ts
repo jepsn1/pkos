@@ -11,6 +11,7 @@ import { KnowledgeToolsService } from '../knowledge/knowledge-tools.service';
 import { KNOWLEDGE_REPO, type KnowledgeRepo, type SearchHit } from '../knowledge/knowledge.repo';
 import { VaultService } from '../knowledge/vault.service';
 import { MediaToolsService } from '../sermons/media-tools.service';
+import { VisionToolsService } from '../vision/vision-tools.service';
 import { WebSearchToolService } from '../web-search/web-search-tools.service';
 import {
   CHAT_REPO,
@@ -32,11 +33,25 @@ import {
   type ThinkLevel,
 } from './llm.provider';
 
+/** An image attached to the current turn — stored (portable `url`) and ready for a
+ *  vision model (`base64`, no data: prefix). Threaded into tool execution via ctx. */
+export interface RequestImage {
+  url: string;
+  mime: string;
+  base64: string;
+}
+
+/** Per-turn context handed to a tool at execution time (request-scoped data that
+ *  isn't in the tool-call arguments). Only the vision toolset uses it today. */
+export interface ToolContext {
+  images: RequestImage[];
+}
+
 /** A service exposing LLM tools: definitions, executor, and routing rules. */
 interface ToolSet {
   readonly tools: LlmTool[];
   routingPrompt(): string;
-  execute(call: LlmToolCall): Promise<string>;
+  execute(call: LlmToolCall, ctx?: ToolContext): Promise<string>;
 }
 
 export interface ChatResult {
@@ -95,6 +110,7 @@ export class ChatService {
     @Optional() private readonly knowledgeTools?: KnowledgeToolsService,
     @Optional() private readonly webSearch?: WebSearchToolService,
     @Optional() private readonly mediaTools?: MediaToolsService,
+    @Optional() private readonly visionTools?: VisionToolsService,
   ) {}
 
   /** Every tool-exposing service that is wired in (each is optional). */
@@ -104,6 +120,7 @@ export class ChatService {
       this.knowledgeTools,
       this.webSearch,
       this.mediaTools,
+      this.visionTools,
     ];
     return sets.filter((s): s is ToolSet => s !== undefined);
   }
@@ -160,6 +177,7 @@ export class ChatService {
     onThinking?: (token: string) => void,
     model?: string,
     think?: ThinkLevel,
+    images: RequestImage[] = [],
   ): Promise<{ answer: string; citations: Citation[] }> {
     // Retrieve on the recent conversation, not just this message: a vague
     // follow-up ("what else does it say?") embeds to nothing on its own, so the
@@ -183,11 +201,18 @@ export class ChatService {
       citations.push({ path: n.path, title: n.title, via: 'graph', relation: relationLabel(n) });
     }
 
+    // gpt-oss can't see images; tell it one is attached so it can route to
+    // make_note_from_image when (and only when) the user asks to note it.
+    const userContent =
+      images.length > 0
+        ? `${message}\n\n[System: ${images.length} image(s) are attached to THIS message. The vision tool make_note_from_image can read them; use it only if the user is asking you to make/save a note from the image.]`
+        : message;
     const llmMessages: LlmMessage[] = [
       { role: 'system', content: await this.systemPrompt(hits, neighbors) },
       ...history,
-      { role: 'user', content: message },
+      { role: 'user', content: userContent },
     ];
+    const ctx: ToolContext = { images };
     // Planner: all wired toolsets (fitness, knowledge) are offered on every turn;
     // the system prompt routes matching turns to them, the rest stays on retrieval.
     const toolsets = this.toolsets();
@@ -229,7 +254,7 @@ export class ChatService {
         // Dispatch by tool name; unknown names land on the first set → {error}.
         const owner =
           toolsets.find((s) => s.tools.some((t) => t.name === call.name)) ?? toolsets[0];
-        const result = await owner.execute(call);
+        const result = await owner.execute(call, ctx);
         // Observability: tool routing is the main failure mode of small local
         // models — log every call verbatim so "it said no data" is debuggable.
         console.log(

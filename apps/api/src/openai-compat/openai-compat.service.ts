@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { AttachmentsService, attachmentUrl } from '../attachments/attachments.service';
 import type { Citation } from '../chat/chat.repo';
-import { ChatService } from '../chat/chat.service';
+import { ChatService, type RequestImage } from '../chat/chat.service';
 import type { LlmMessage, ThinkLevel } from '../chat/llm.provider';
 import { WebuiImportService } from '../webui-import/webui-import.service';
 
@@ -32,8 +33,19 @@ export const MODEL_ID = COMPAT_MODELS[0].id;
 
 // --- OpenAI wire types (the subset we speak) ---------------------------------
 
-/** OpenAI content is a string or an array of typed parts (multimodal). */
-type OpenAiContent = string | Array<{ type?: string; text?: string }>;
+/** OpenAI content is a string or an array of typed parts (multimodal: text + image_url). */
+type OpenAiPart = {
+  type?: string;
+  text?: string;
+  image_url?: string | { url?: string };
+};
+type OpenAiContent = string | OpenAiPart[];
+
+/** A base64 image pulled from the request (data: URI decoded into bytes-to-be). */
+export interface InlineImage {
+  base64: string;
+  mime: string;
+}
 
 export interface OpenAiMessage {
   role: string;
@@ -87,7 +99,33 @@ export class OpenAiCompatService {
   constructor(
     private readonly chat: ChatService,
     @Optional() private readonly webuiImport?: WebuiImportService,
+    @Optional() private readonly attachments?: AttachmentsService,
   ) {}
+
+  /**
+   * Pull any inline base64 images out of the request, store the originals (so the
+   * note can embed a portable pkos URL), and return them ready for the vision
+   * model. Best-effort: without an attachment store, or with no images, returns [].
+   */
+  private async collectImages(body: CompletionRequest): Promise<RequestImage[]> {
+    if (!this.attachments) return [];
+    const parts = extractImageParts(body);
+    const out: RequestImage[] = [];
+    for (const img of parts) {
+      try {
+        const buffer = Buffer.from(img.base64, 'base64');
+        const ext = mimeExt(img.mime);
+        const a = await this.attachments.store(
+          { buffer, originalname: `image${ext}`, mimetype: img.mime },
+          undefined,
+        );
+        out.push({ url: attachmentUrl(a.id), mime: a.mime, base64: img.base64 });
+      } catch (err) {
+        console.warn(`[compat] skip inline image: ${(err as Error).message}`);
+      }
+    }
+    return out;
+  }
 
   /**
    * Import any webui-attached files into our store and append their pkos URLs to
@@ -120,6 +158,7 @@ export class OpenAiCompatService {
     const preset = resolveModel(body.model);
     let content: string;
     try {
+      const images = await this.collectImages(body);
       const augmented = await this.withImportedAttachments(message);
       const { answer, citations } = await this.chat.answer(
         augmented,
@@ -128,6 +167,7 @@ export class OpenAiCompatService {
         undefined,
         undefined,
         preset.think,
+        images,
       );
       // Footer off by default (voice-first, matches the streaming path); opt in via env.
       content =
@@ -191,6 +231,7 @@ export class OpenAiCompatService {
       }
     };
     try {
+      const images = await this.collectImages(body);
       const augmented = await this.withImportedAttachments(message);
       const { citations } = await this.chat.answer(
         augmented,
@@ -210,6 +251,7 @@ export class OpenAiCompatService {
           : undefined,
         undefined,
         preset.think,
+        images,
       );
       closeThink();
       if (emitFooter) {
@@ -266,8 +308,10 @@ export function parseMessages(body: CompletionRequest): {
   if (!Array.isArray(messages) || messages.length === 0) {
     throw new BadRequestException('messages array required');
   }
+  // A user turn counts if it has text OR an image (an attached photo with no
+  // caption is a valid turn — the vision tool reads the image).
   const lastUserIdx = messages.findLastIndex(
-    (m) => m?.role === 'user' && contentText(m.content).trim() !== '',
+    (m) => m?.role === 'user' && (contentText(m.content).trim() !== '' || hasImagePart(m.content)),
   );
   if (lastUserIdx === -1) {
     throw new BadRequestException('at least one non-empty user message required');
@@ -281,6 +325,53 @@ export function parseMessages(body: CompletionRequest): {
     }))
     .filter((m) => m.content.trim() !== '');
   return { message: contentText(messages[lastUserIdx].content), history };
+}
+
+/**
+ * Pull inline images out of the LAST user message (webui attaches vision images as
+ * image_url parts with a `data:<mime>;base64,<data>` URI). Text parts are ignored
+ * here — those are handled by parseMessages/contentText.
+ */
+export function extractImageParts(body: CompletionRequest): InlineImage[] {
+  const messages = body?.messages;
+  if (!Array.isArray(messages)) return [];
+  const lastUser = messages.filter((m) => m?.role === 'user').at(-1);
+  const content = lastUser?.content;
+  if (!Array.isArray(content)) return [];
+  const out: InlineImage[] = [];
+  for (const part of content) {
+    if (part?.type !== 'image_url') continue;
+    const url = typeof part.image_url === 'string' ? part.image_url : part.image_url?.url;
+    const parsed = parseDataUri(url);
+    if (parsed) out.push(parsed);
+  }
+  return out;
+}
+
+/** True when a content array carries at least one image_url part. */
+function hasImagePart(content: OpenAiContent | undefined): boolean {
+  return Array.isArray(content) && content.some((p) => p?.type === 'image_url');
+}
+
+/** Decode a `data:<mime>;base64,<data>` URI; null for anything else (e.g. http URLs). */
+function parseDataUri(url: string | undefined): InlineImage | null {
+  if (!url) return null;
+  const m = url.match(/^data:([^;,]+);base64,(.+)$/s);
+  if (!m) return null;
+  return { mime: m[1], base64: m[2] };
+}
+
+/** File extension for a stored image blob, from its mime type. */
+function mimeExt(mime: string): string {
+  const map: Record<string, string> = {
+    'image/jpeg': '.jpg',
+    'image/jpg': '.jpg',
+    'image/png': '.png',
+    'image/webp': '.webp',
+    'image/gif': '.gif',
+    'image/heic': '.heic',
+  };
+  return map[mime.toLowerCase()] ?? '.img';
 }
 
 /** Flatten string-or-parts OpenAI content to plain text. */

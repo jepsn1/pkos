@@ -4,6 +4,7 @@ import { FitnessModule } from '../fitness/fitness.module';
 import { GraphModule } from '../graph/graph.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { SermonsModule } from '../sermons/sermons.module';
+import { VisionModule } from '../vision/vision.module';
 import { WebSearchModule } from '../web-search/web-search.module';
 import { ChatController } from './chat.controller';
 import { CHAT_REPO, DrizzleChatRepo } from './chat.repo';
@@ -12,7 +13,7 @@ import { LLM_FETCH, LLM_PROVIDER, OllamaLlmProvider } from './llm.provider';
 import { SaveService } from './save.service';
 
 @Module({
-  imports: [KnowledgeModule, GraphModule, FitnessModule, WebSearchModule, SermonsModule],
+  imports: [KnowledgeModule, GraphModule, FitnessModule, WebSearchModule, SermonsModule, VisionModule],
   controllers: [ChatController],
   providers: [
     ChatService,

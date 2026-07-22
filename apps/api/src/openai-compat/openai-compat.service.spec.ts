@@ -1,9 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
+import { attachmentUrl } from '../attachments/attachments.service';
 import type { Citation } from '../chat/chat.repo';
 import type { ChatService } from '../chat/chat.service';
 import type { LlmMessage } from '../chat/llm.provider';
 import {
+  extractImageParts,
   MODEL_ID,
   OpenAiCompatService,
   parseMessages,
@@ -23,7 +25,12 @@ function serviceWith(
   answer = 'Grace is unmerited favor.',
   tokens: string[] = [answer],
 ) {
-  const calls: Array<{ message: string; history: LlmMessage[]; think?: boolean | string }> = [];
+  const calls: Array<{
+    message: string;
+    history: LlmMessage[];
+    think?: boolean | string;
+    images?: unknown[];
+  }> = [];
   const chat = {
     answer: async (
       message: string,
@@ -32,13 +39,30 @@ function serviceWith(
       _onThinking?: (token: string) => void,
       _model?: string,
       think?: boolean | string,
+      images?: unknown[],
     ) => {
-      calls.push({ message, history, think });
+      calls.push({ message, history, think, images });
       if (onToken) for (const t of tokens) onToken(t);
       return { answer, citations };
     },
   } as unknown as ChatService;
   return { service: new OpenAiCompatService(chat), calls };
+}
+
+/** A stand-in attachment store: records what it stored, returns a stable id. */
+function attachmentsSpy() {
+  const stored: Array<{ originalname: string; mimetype: string; size: number }> = [];
+  const attachments = {
+    store: async (file: { buffer: Buffer; originalname: string; mimetype: string }) => {
+      stored.push({
+        originalname: file.originalname,
+        mimetype: file.mimetype,
+        size: file.buffer.length,
+      });
+      return { id: 'att-1', mime: file.mimetype };
+    },
+  };
+  return { attachments, stored };
 }
 
 describe('listModels', () => {
@@ -120,6 +144,94 @@ describe('parseMessages (OpenAI → ChatService translation)', () => {
   });
 });
 
+describe('extractImageParts', () => {
+  it('pulls base64 data-URI images from the last user message (both part shapes)', () => {
+    const imgs = extractImageParts({
+      messages: [
+        { role: 'user', content: 'ignore this earlier one' },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'make a note from this' },
+            { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } },
+            { type: 'image_url', image_url: 'data:image/jpeg;base64,BBBB' },
+          ],
+        },
+      ],
+    });
+    expect(imgs).toEqual([
+      { mime: 'image/png', base64: 'AAAA' },
+      { mime: 'image/jpeg', base64: 'BBBB' },
+    ]);
+  });
+
+  it('ignores non-data URLs and text-only messages', () => {
+    expect(
+      extractImageParts({
+        messages: [
+          {
+            role: 'user',
+            content: [{ type: 'image_url', image_url: { url: 'https://example.com/x.png' } }],
+          },
+        ],
+      }),
+    ).toEqual([]);
+    expect(extractImageParts({ messages: [{ role: 'user', content: 'hi' }] })).toEqual([]);
+  });
+});
+
+describe('inline images → ChatService', () => {
+  it('stores the original and passes {url,mime,base64} through to answer()', async () => {
+    const { attachments, stored } = attachmentsSpy();
+    const calls: Array<{ images?: unknown[] }> = [];
+    const chat = {
+      answer: async (
+        _m: string,
+        _h: LlmMessage[],
+        _t?: unknown,
+        _th?: unknown,
+        _model?: unknown,
+        _think?: unknown,
+        images?: unknown[],
+      ) => {
+        calls.push({ images });
+        return { answer: 'saved', citations: [] };
+      },
+    } as unknown as ChatService;
+    const service = new OpenAiCompatService(chat, undefined, attachments as never);
+
+    await service.complete({
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'make a note from this' },
+            { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,QUJD' } },
+          ],
+        },
+      ],
+    });
+
+    expect(stored).toEqual([{ originalname: 'image.jpg', mimetype: 'image/jpeg', size: 3 }]);
+    expect(calls[0].images).toEqual([
+      { url: attachmentUrl('att-1'), mime: 'image/jpeg', base64: 'QUJD' },
+    ]);
+  });
+
+  it('passes no images when the store is not configured', async () => {
+    const { service, calls } = serviceWith([]);
+    await service.complete({
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }],
+        },
+      ],
+    });
+    expect(calls[0].images).toEqual([]);
+  });
+});
+
 describe('complete (ChatService → OpenAI translation)', () => {
   it('returns an OpenAI-shaped completion, answer only (no footer by default)', async () => {
     const { service, calls } = serviceWith([GRACE_CITATION]);
@@ -129,7 +241,7 @@ describe('complete (ChatService → OpenAI translation)', () => {
     });
 
     expect(calls).toEqual([
-      { message: 'what have I collected about grace?', history: [], think: 'low' },
+      { message: 'what have I collected about grace?', history: [], think: 'low', images: [] },
     ]);
     expect(res.object).toBe('chat.completion');
     expect(res.id).toMatch(/^chatcmpl-/);
