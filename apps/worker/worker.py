@@ -8,6 +8,7 @@ STALE_PROCESSING_MIN (processing rows older than this are re-queued).
 import json
 import logging
 import os
+import subprocess
 import time
 import urllib.request
 
@@ -47,6 +48,28 @@ class OllamaEmbedder:
         raise RuntimeError(f"ollama embed failed after {EMBED_RETRIES} tries: {last}")
 
 
+class YtDlpDownloader:
+    """Download a URL's audio to UPLOADS_PATH as <job_id>.mp3 via yt-dlp+ffmpeg."""
+
+    def __init__(self, uploads_dir: str):
+        self.uploads = uploads_dir
+
+    def download(self, url: str, job_id: str) -> str:
+        out_tmpl = os.path.join(self.uploads, f"{job_id}.%(ext)s")
+        proc = subprocess.run(
+            ["yt-dlp", "-x", "--audio-format", "mp3", "--no-playlist",
+             "-o", out_tmpl, url],
+            capture_output=True, text=True,
+        )
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout or "").strip()[-500:]
+            raise RuntimeError(f"yt-dlp failed: {tail}")
+        rel = f"{job_id}.mp3"
+        if not os.path.exists(os.path.join(self.uploads, rel)):
+            raise RuntimeError("yt-dlp produced no mp3")
+        return rel
+
+
 class WhisperTranscriber:
     """Lazy-loads the model: first job pays the download, idle worker stays lean."""
 
@@ -77,13 +100,14 @@ def main() -> None:
         os.environ.get("EMBEDDING_MODEL", "nomic-embed-text"),
     )
     resolve_audio = lambda rel: os.path.join(uploads, rel)  # noqa: E731
+    downloader = YtDlpDownloader(uploads)
 
     log.info("worker up: polling every %ss, stale-processing=%smin", poll_sec, stale_min)
     while True:
         try:
             with psycopg.connect(dsn) as conn:
                 store = PgJobStore(conn, stale_minutes=stale_min)
-                while process_one(store, transcriber, embedder, resolve_audio):
+                while process_one(store, transcriber, embedder, resolve_audio, downloader):
                     pass
         except Exception:  # noqa: BLE001 — db hiccup: back off, reconnect
             log.exception("worker loop error; retrying in %ss", poll_sec)

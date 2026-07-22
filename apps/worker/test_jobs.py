@@ -31,6 +31,7 @@ class FakeStore:
         self.jobs = list(jobs)
         self.completed = []
         self.failed = []
+        self.audio_paths = []
 
     def claim(self):
         return self.jobs.pop(0) if self.jobs else None
@@ -40,6 +41,22 @@ class FakeStore:
 
     def fail(self, job_id, message):
         self.failed.append((job_id, message))
+
+    def set_audio_path(self, job_id, audio_path):
+        self.audio_paths.append((job_id, audio_path))
+
+
+class FakeDownloader:
+    def __init__(self, result="job.mp3", error=None):
+        self.result = result
+        self.error = error
+        self.calls = []
+
+    def download(self, url, job_id):
+        self.calls.append((url, job_id))
+        if self.error:
+            raise self.error
+        return self.result
 
 
 class FakeTranscriber:
@@ -113,3 +130,34 @@ def test_embedding_error_marks_job_error():
     transcriber = FakeTranscriber([Segment(0, 1, "hello")])
     assert process_one(store, transcriber, BoomEmbedder(), str) is True
     assert "ollama down" in store.failed[0][1]
+
+
+URL_JOB = Job("job-2", "My Talk", None, source_url="https://youtu.be/x")
+
+
+def test_url_job_downloads_then_transcribes():
+    store = FakeStore([URL_JOB])
+    downloader = FakeDownloader(result="job-2.mp3")
+    transcriber = FakeTranscriber([Segment(0, 2, "hello world")])
+
+    assert process_one(store, transcriber, FakeEmbedder(),
+                       lambda rel: f"/uploads/{rel}", downloader) is True
+
+    assert downloader.calls == [("https://youtu.be/x", "job-2")]
+    assert store.audio_paths == [("job-2", "job-2.mp3")]      # persisted for resume
+    assert transcriber.paths == ["/uploads/job-2.mp3"]        # transcribed the download
+    assert store.completed and store.failed == []
+
+
+def test_url_job_without_downloader_errors():
+    store = FakeStore([URL_JOB])
+    assert process_one(store, FakeTranscriber(), FakeEmbedder(), str, None) is True
+    assert store.failed and "downloader" in store.failed[0][1]
+
+
+def test_download_failure_marks_job_error():
+    store = FakeStore([URL_JOB])
+    downloader = FakeDownloader(error=RuntimeError("yt-dlp failed: video unavailable"))
+    assert process_one(store, FakeTranscriber(), FakeEmbedder(), str, downloader) is True
+    assert "video unavailable" in store.failed[0][1]
+    assert store.completed == []

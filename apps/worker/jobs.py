@@ -16,7 +16,10 @@ DEFAULT_STALE_PROCESSING_MIN = 60
 class Job:
     id: str
     original_filename: str
-    audio_path: str
+    # NULL for a URL job until the download step fills it in.
+    audio_path: Optional[str]
+    # Set for a URL job; the worker downloads it (yt-dlp) before transcribing.
+    source_url: Optional[str] = None
 
 
 def is_claimable(
@@ -43,10 +46,16 @@ class JobStore(Protocol):
     def complete(self, job_id: str, transcript: str, chunks: list[Chunk],
                  embeddings: list[list[float]]) -> None: ...
     def fail(self, job_id: str, message: str) -> None: ...
+    def set_audio_path(self, job_id: str, audio_path: str) -> None: ...
 
 
 class Transcriber(Protocol):
     def transcribe(self, audio_path: str):  # -> iterable of segments
+        ...
+
+
+class Downloader(Protocol):
+    def download(self, url: str, job_id: str) -> str:  # -> audio path relative to uploads
         ...
 
 
@@ -59,19 +68,30 @@ def process_one(
     transcriber: Transcriber,
     embedder: Embedder,
     resolve_audio,
+    downloader: Optional[Downloader] = None,
     max_words: int = 500,
 ) -> bool:
     """Claim and fully process one job. Returns False when queue is empty.
 
-    Any exception marks the job `error` with the message; the worker loop
-    survives and moves on.
+    A URL job (audio_path NULL, source_url set) is downloaded first, then treated
+    like an uploaded file. Any exception marks the job `error` with the message;
+    the worker loop survives and moves on.
     """
     job = store.claim()
     if job is None:
         return False
-    log.info("job %s: transcribing %s", job.id, job.original_filename)
+    log.info("job %s: processing %s", job.id, job.original_filename)
     try:
-        segments = transcriber.transcribe(resolve_audio(job.audio_path))
+        audio_rel = job.audio_path
+        if not audio_rel and job.source_url:
+            if downloader is None:
+                raise ValueError("url job but no downloader configured")
+            log.info("job %s: downloading %s", job.id, job.source_url)
+            audio_rel = downloader.download(job.source_url, job.id)
+            store.set_audio_path(job.id, audio_rel)  # persist so a requeue resumes
+        if not audio_rel:
+            raise ValueError("job has neither audio_path nor source_url")
+        segments = transcriber.transcribe(resolve_audio(audio_rel))
         chunks = chunk_segments(segments, max_words=max_words)
         if not chunks:
             raise ValueError("transcription produced no text")
@@ -99,7 +119,7 @@ class PgJobStore:
             FOR UPDATE SKIP LOCKED
             LIMIT 1
         )
-        RETURNING id, original_filename, audio_path
+        RETURNING id, original_filename, audio_path, source_url
     """
 
     def __init__(self, conn, stale_minutes: int = DEFAULT_STALE_PROCESSING_MIN):
@@ -111,7 +131,15 @@ class PgJobStore:
             cur.execute(self.CLAIM_SQL, {"stale": self.stale_minutes})
             row = cur.fetchone()
         self.conn.commit()
-        return Job(str(row[0]), row[1], row[2]) if row else None
+        return Job(str(row[0]), row[1], row[2], row[3]) if row else None
+
+    def set_audio_path(self, job_id: str, audio_path: str) -> None:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "UPDATE sermon_jobs SET audio_path = %s, updated = now() WHERE id = %s",
+                (audio_path, job_id),
+            )
+        self.conn.commit()
 
     def complete(self, job_id, transcript, chunks, embeddings) -> None:
         with self.conn.cursor() as cur:
