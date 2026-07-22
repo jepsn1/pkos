@@ -44,16 +44,13 @@ export interface EnrichResult {
  *  points and fragmentary quotes. */
 const BILINGUAL = `
 
-LIVE-INTERPRETED AUDIO: parts of this transcript may be live-interpreted, where a sentence is spoken and then immediately repeated as a near-translation in the other language by an interpreter. This rule applies ONLY to such matched pairs — two adjacent sentences that clearly say the same thing in two languages:
-- collapse each pair to ONE point (never output both the sentence and its translation), and
-- take the quote from the FIRST sentence of the pair (the original speaker); the second is the interpreter.
-Do NOT infer the talk's overall language from the intro or from any sentence that is NOT part of a matched pair — greetings and introductions may be in a different language and are not translations. Every key_quote must be a complete, meaningful sentence, never a short repeated fragment. Write the summary, themes, and action points in English.`;
+LANGUAGE: Write the ENTIRE note — summary, section notes, action points, AND key_quotes — in ENGLISH. If the audio is live-interpreted (statements repeated in two languages by an interpreter), collapse each repeated statement to ONE point (never output the same idea twice) and use the ENGLISH version for everything — the interpreter's English if present, otherwise translate faithfully. Never leave Danish (or other non-English) text in the note. Every key_quote must be a complete, meaningful English sentence, never a short repeated fragment.`;
 
 const ENRICH_SYSTEM = `You are a careful note-taker turning a sermon transcript into DETAILED study notes for a personal knowledge base. Capture what was actually preached — never invent content.
 
 Produce thorough NOTES, not a thin summary:
 - "sections" are the main points of the sermon, in order. For each, a short heading AND 2-5 bullet notes explaining what was actually said under it — the argument, the examples used, how it was developed — enough that someone who missed the sermon understands the point. Never one-word or one-line points.
-- "bible_references" MUST list EVERY scripture the preacher reads or cites — this is the most important field, never omit any.
+- "bible_references" MUST list EVERY scripture the preacher reads or cites — this is the most important field, never omit any. Give them as standard ENGLISH book names, normalizing Danish names: 1./2./3./4./5. Mosebog = Genesis/Exodus/Leviticus/Numbers/Deuteronomy, Salmerne = Psalms, Ordsprogene = Proverbs, Åbenbaringen = Revelation, Prædikeren = Ecclesiastes, etc. If a reference is garbled in the transcript, use the surrounding context to give the correct book+chapter, or omit it rather than guessing wrong.
 - "key_quotes" are a few complete, memorable sentences, verbatim.
 
 Respond with ONLY a JSON object, no other text:
