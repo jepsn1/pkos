@@ -4,7 +4,9 @@ import { SermonsService } from './sermons.service';
 
 /** Appended to the chat system prompt so the planner routes video links here. */
 export const MEDIA_ROUTING = `You also have a video/audio transcription tool:
-- transcribe_video (MEDIA): when the user shares a video or audio URL (YouTube etc.) and wants it turned into notes — "make notes from this", "transcribe this", "take sermon notes on this video" — call it with the url. Pass style "sermon" for a sermon / faith video, otherwise "general" (the default). It is ASYNC: after it returns, tell the user transcription has STARTED and the note will appear in their vault in a few minutes. Do NOT invent the note's contents or claim it is already finished.`;
+- transcribe_video (MEDIA): the ONLY correct way to make notes from a video or audio URL (YouTube etc.). Whenever the user shares such a URL and wants notes / a summary / transcription, you MUST call transcribe_video with the url (style "sermon" for a sermon or faith video, else "general").
+  CRITICAL: you have NOT seen the video's content. A page title, description, or channel name is NOT the content. NEVER write a summary or call save_note about a video from its title, your own memory, or retrieved notes — that is fabrication and is forbidden. The real notes come only from the transcript, which transcribe_video produces.
+  It is ASYNC: after calling it, tell the user transcription has STARTED and the note will appear in a few minutes. Do NOT also call save_note for the video, and do NOT claim it is finished.`;
 
 const MEDIA_TOOLS: LlmTool[] = [
   {
