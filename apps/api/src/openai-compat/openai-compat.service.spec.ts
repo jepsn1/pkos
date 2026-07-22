@@ -23,14 +23,16 @@ function serviceWith(
   answer = 'Grace is unmerited favor.',
   tokens: string[] = [answer],
 ) {
-  const calls: Array<{ message: string; history: LlmMessage[] }> = [];
+  const calls: Array<{ message: string; history: LlmMessage[]; model?: string }> = [];
   const chat = {
     answer: async (
       message: string,
       history: LlmMessage[],
       onToken?: (token: string) => void,
+      _onThinking?: (token: string) => void,
+      model?: string,
     ) => {
-      calls.push({ message, history });
+      calls.push({ message, history, model });
       if (onToken) for (const t of tokens) onToken(t);
       return { answer, citations };
     },
@@ -39,12 +41,50 @@ function serviceWith(
 }
 
 describe('listModels', () => {
-  it('exposes exactly one model, id "pkos"', () => {
+  it('exposes the labeled model tiers, default first, each with a friendly name', () => {
     const { service } = serviceWith([]);
     const res = service.listModels();
     expect(res.object).toBe('list');
-    expect(res.data).toHaveLength(1);
-    expect(res.data[0]).toMatchObject({ id: 'pkos', object: 'model' });
+    expect(res.data.length).toBeGreaterThan(1);
+    expect(res.data[0]).toMatchObject({ id: 'pkos-smart', object: 'model' });
+    for (const m of res.data) {
+      expect(m.id).toMatch(/^pkos-/);
+      expect(typeof m.name).toBe('string');
+      expect(m.name.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('model selection', () => {
+  it('routes the chosen id to its ollama model and echoes the id back', async () => {
+    const { service, calls } = serviceWith([]);
+    const res = await service.complete({
+      model: 'pkos-fast',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+    expect(calls[0].model).toBe('qwen3:4b');
+    expect(res.model).toBe('pkos-fast');
+  });
+
+  it('falls back to the default model for a legacy/unknown id', async () => {
+    const { service, calls } = serviceWith([]);
+    const res = await service.complete({
+      model: 'pkos',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+    expect(calls[0].model).toBe('gpt-oss:20b');
+    expect(res.model).toBe('pkos-smart');
+  });
+
+  it('streaming routes the chosen model too', async () => {
+    const { service, calls } = serviceWith([]);
+    const chunks: CompletionChunk[] = [];
+    await service.streamCompletion(
+      { model: 'pkos-reasoner', messages: [{ role: 'user', content: 'hi' }] },
+      (c) => chunks.push(c),
+    );
+    expect(calls[0].model).toBe('qwen3:14b');
+    expect(chunks[0].model).toBe('pkos-reasoner');
   });
 });
 
@@ -91,7 +131,7 @@ describe('complete (ChatService → OpenAI translation)', () => {
     });
 
     expect(calls).toEqual([
-      { message: 'what have I collected about grace?', history: [] },
+      { message: 'what have I collected about grace?', history: [], model: 'gpt-oss:20b' },
     ]);
     expect(res.object).toBe('chat.completion');
     expect(res.id).toMatch(/^chatcmpl-/);

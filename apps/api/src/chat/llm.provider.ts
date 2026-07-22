@@ -34,19 +34,21 @@ export interface LlmReply {
  *  Without `tools` the reply is a plain string (legacy behavior); with `tools`
  *  it is an LlmReply that may carry tool calls. */
 export interface LlmProvider {
-  chat(messages: LlmMessage[], tools?: LlmTool[]): Promise<string | LlmReply>;
+  chat(messages: LlmMessage[], tools?: LlmTool[], model?: string): Promise<string | LlmReply>;
   /**
    * Streaming variant: `onToken` receives content deltas as they arrive; the
    * resolved LlmReply is the assembled final reply (content + tool_calls).
    * Once a tool_call appears in the stream, later content deltas are NOT
    * forwarded to `onToken` (tool rounds stay silent) but still land in
    * `reply.content`. Optional so simple test fakes stay valid.
+   * `model` overrides LLM_MODEL for this call (per-request model selection).
    */
   chatStream?(
     messages: LlmMessage[],
     tools: LlmTool[] | undefined,
     onToken: (token: string) => void,
     onThinking?: (token: string) => void,
+    model?: string,
   ): Promise<LlmReply>;
 }
 
@@ -168,9 +170,13 @@ export class ThinkFilter {
 export class OllamaLlmProvider implements LlmProvider {
   constructor(@Inject(LLM_FETCH) private readonly fetchFn: typeof fetch) {}
 
-  async chat(messages: LlmMessage[], tools?: LlmTool[]): Promise<string | LlmReply> {
+  async chat(
+    messages: LlmMessage[],
+    tools?: LlmTool[],
+    model?: string,
+  ): Promise<string | LlmReply> {
     const base = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
-    const model = process.env.LLM_MODEL ?? 'qwen3:14b';
+    model = model ?? process.env.LLM_MODEL ?? 'qwen3:14b';
     const res = await this.fetchFn(`${base}/api/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -218,9 +224,10 @@ export class OllamaLlmProvider implements LlmProvider {
     tools: LlmTool[] | undefined,
     onToken: (token: string) => void,
     onThinking?: (token: string) => void,
+    model?: string,
   ): Promise<LlmReply> {
     const base = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
-    const model = process.env.LLM_MODEL ?? 'qwen3:14b';
+    model = model ?? process.env.LLM_MODEL ?? 'qwen3:14b';
     const res = await this.fetchFn(`${base}/api/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

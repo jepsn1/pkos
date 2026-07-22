@@ -4,8 +4,30 @@ import type { Citation } from '../chat/chat.repo';
 import { ChatService } from '../chat/chat.service';
 import type { LlmMessage } from '../chat/llm.provider';
 
-/** The single model this surface exposes; Open WebUI selects it by id. */
-export const MODEL_ID = 'pkos';
+/**
+ * Chat models shown in Open WebUI's dropdown. `id` round-trips (webui sends the
+ * chosen id back as `model`); `name` is the friendly dropdown label; `ollama` is
+ * the real model routed to. Only models that fit the 16GB card are listed
+ * (qwen3:30b-a3b @18GB would spill to CPU). First entry = default/fallback.
+ */
+export interface CompatModel {
+  id: string;
+  name: string;
+  ollama: string;
+}
+export const COMPAT_MODELS: CompatModel[] = [
+  { id: 'pkos-smart', name: '🧠 Smart · gpt-oss 20B — best all-round (default)', ollama: 'gpt-oss:20b' },
+  { id: 'pkos-reasoner', name: '🤔 Reasoner · qwen3 14B — slower, thinks step-by-step', ollama: 'qwen3:14b' },
+  { id: 'pkos-fast', name: '⚡ Fast · qwen3 4B — quickest, lighter/less capable', ollama: 'qwen3:4b' },
+];
+
+/** Resolve a requested id to a model; legacy 'pkos'/unknown/missing → default. */
+export function resolveModel(id?: string): CompatModel {
+  return COMPAT_MODELS.find((m) => m.id === id) ?? COMPAT_MODELS[0];
+}
+
+/** Default/legacy id (Open WebUI configs may still have "pkos" saved). */
+export const MODEL_ID = COMPAT_MODELS[0].id;
 
 // --- OpenAI wire types (the subset we speak) ---------------------------------
 
@@ -66,15 +88,20 @@ export class OpenAiCompatService {
   listModels() {
     return {
       object: 'list' as const,
-      data: [
-        { id: MODEL_ID, object: 'model' as const, created: 0, owned_by: 'pkos' },
-      ],
+      data: COMPAT_MODELS.map((m) => ({
+        id: m.id,
+        object: 'model' as const,
+        created: 0,
+        owned_by: 'pkos',
+        name: m.name,
+      })),
     };
   }
 
   async complete(body: CompletionRequest): Promise<CompletionResponse> {
     const { message, history } = parseMessages(body);
-    const { answer, citations } = await this.chat.answer(message, history);
+    const model = resolveModel(body.model);
+    const { answer, citations } = await this.chat.answer(message, history, undefined, undefined, model.ollama);
     // Footer off by default (voice-first, matches the streaming path); opt in via env.
     const content =
       process.env.COMPAT_SOURCES_FOOTER === 'true' ? withSources(answer, citations) : answer;
@@ -82,7 +109,7 @@ export class OpenAiCompatService {
       id: `chatcmpl-${randomUUID()}`,
       object: 'chat.completion',
       created: Math.floor(Date.now() / 1000),
-      model: MODEL_ID,
+      model: model.id,
       choices: [
         {
           index: 0,
@@ -107,11 +134,12 @@ export class OpenAiCompatService {
     send: (chunk: CompletionChunk) => void,
   ): Promise<void> {
     const { message, history } = parseMessages(body);
+    const model = resolveModel(body.model);
     const base = {
       id: `chatcmpl-${randomUUID()}`,
       object: 'chat.completion.chunk' as const,
       created: Math.floor(Date.now() / 1000),
-      model: MODEL_ID,
+      model: model.id,
     };
     const chunk = (
       delta: CompletionChunk['choices'][0]['delta'],
@@ -149,6 +177,7 @@ export class OpenAiCompatService {
               send(chunk({ content: thought }));
             }
           : undefined,
+        model.ollama,
       );
       closeThink();
       if (emitFooter) {
