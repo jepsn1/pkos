@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AttachmentsModule } from './attachments/attachments.module';
 import { ChatModule } from './chat/chat.module';
 import { EnrichmentModule } from './sermons/enrichment.module';
 import { FitnessModule } from './fitness/fitness.module';
@@ -20,6 +21,7 @@ import { SuggestionsModule } from './suggestions/suggestions.module';
     EnrichmentModule,
     FitnessModule,
     SuggestionsModule,
+    AttachmentsModule,
   ],
 })
 export class AppModule {}

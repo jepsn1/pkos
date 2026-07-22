@@ -285,3 +285,34 @@ export const suggestions = pgTable(
     index('suggestions_status_idx').on(t.status),
   ],
 );
+
+/**
+ * Original uploaded files (docx/pptx/pdf/images) — the RAW source behind a note,
+ * kept so the user never loses the original. Blobs live on disk under
+ * ATTACHMENTS_PATH (deduped by sha256), NOT in the git vault. `itemId` links an
+ * attachment to the knowledge note distilled from it (null when unlinked or the
+ * note is deleted). Markdown references the blob by URL (GET /api/attachments/:id).
+ */
+export const attachments = pgTable(
+  'attachments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    /** Filename as uploaded, e.g. "MindofChrist.pptx". */
+    filename: text('filename').notNull(),
+    /** MIME type, e.g. application/pdf, image/png. */
+    mime: text('mime').notNull(),
+    /** Size in bytes. */
+    size: integer('size').notNull(),
+    /** sha256 of the bytes — dedupe key + on-disk name. */
+    sha256: text('sha256').notNull(),
+    /** Path relative to ATTACHMENTS_PATH (host/container mounts differ). */
+    diskPath: text('disk_path').notNull(),
+    /** The note distilled from this file, if any. */
+    itemId: uuid('item_id').references(() => knowledgeItems.id, { onDelete: 'set null' }),
+    created: timestamp('created', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('attachments_sha256_idx').on(t.sha256),
+    index('attachments_item_id_idx').on(t.itemId),
+  ],
+);
