@@ -11,8 +11,13 @@ import { KnowledgeService } from '../knowledge/knowledge.service';
 
 /** Vision model (multimodal) — separate from LLM_MODEL; runs on the same ollama. */
 const VISION_MODEL = process.env.VISION_MODEL ?? 'qwen2.5vl:7b';
+/** GPU layer cap for the vision model. qwen2.5vl:32b (~20GB q4) + a 12MP image's
+ *  ~1.8GB compute buffer overflows the 16GB card if ollama auto-fits; pinning
+ *  layers below auto forces the rest onto CPU RAM so it fits reliably. Unset (0
+ *  -> undefined) lets ollama decide, correct for a 7B that fits fully. */
+const VISION_NUM_GPU = Number(process.env.VISION_NUM_GPU ?? 0) || undefined;
 /** Vision extraction needs room for a full page of text; think off (qwen2.5vl is not a reasoner). */
-const VISION_GEN = { numCtx: 8192, numPredict: 4000 };
+const VISION_GEN = { numCtx: 8192, numPredict: 4000, numGpu: VISION_NUM_GPU };
 
 /** Appended to the chat system prompt so the planner routes image-note turns here. */
 export const VISION_ROUTING = `You also have a tool for making notes from images the user has attached:

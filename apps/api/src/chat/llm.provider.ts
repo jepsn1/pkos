@@ -42,6 +42,10 @@ export type ThinkLevel = boolean | string;
 export interface GenOptions {
   numCtx?: number;
   numPredict?: number;
+  /** Cap GPU-offloaded layers. Big vision models (qwen2.5vl:32b) OOM on the 16GB
+   *  card if ollama's auto-fit leaves no room for the image compute buffer — pin
+   *  this below auto to force more layers onto CPU RAM (slower, but it fits). */
+  numGpu?: number;
 }
 
 export interface LlmProvider {
@@ -208,6 +212,7 @@ export class OllamaLlmProvider implements LlmProvider {
         options: {
           num_ctx: gen?.numCtx ?? LLM_NUM_CTX,
           num_predict: gen?.numPredict ?? LLM_NUM_PREDICT,
+          ...(gen?.numGpu !== undefined ? { num_gpu: gen.numGpu } : {}),
         },
         ...(tools?.length
           ? { tools: tools.map((t) => ({ type: 'function', function: t })) }
