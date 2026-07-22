@@ -106,16 +106,23 @@ class YtDlpDownloader:
 class WhisperTranscriber:
     """Lazy-loads the model: first job pays the download, idle worker stays lean."""
 
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str, cpu_threads: int = 8):
         self.model_name = model_name
+        self.cpu_threads = cpu_threads
         self._model = None
 
     def transcribe(self, audio_path: str):
         if self._model is None:
             from faster_whisper import WhisperModel
 
-            log.info("loading whisper model %s (cpu/int8)", self.model_name)
-            self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
+            log.info(
+                "loading whisper model %s (cpu/int8, %d threads)",
+                self.model_name, self.cpu_threads,
+            )
+            self._model = WhisperModel(
+                self.model_name, device="cpu", compute_type="int8",
+                cpu_threads=self.cpu_threads,
+            )
         segments, _info = self._model.transcribe(audio_path)
         return segments
 
@@ -127,7 +134,10 @@ def main() -> None:
     poll_sec = float(os.environ.get("POLL_INTERVAL_SEC", "5"))
     stale_min = int(os.environ.get("STALE_PROCESSING_MIN", str(DEFAULT_STALE_PROCESSING_MIN)))
 
-    transcriber = WhisperTranscriber(os.environ.get("WHISPER_MODEL", "small"))
+    transcriber = WhisperTranscriber(
+        os.environ.get("WHISPER_MODEL", "small"),
+        cpu_threads=int(os.environ.get("WHISPER_CPU_THREADS", "8")),
+    )
     embedder = OllamaEmbedder(
         os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434"),
         os.environ.get("EMBEDDING_MODEL", "nomic-embed-text"),
