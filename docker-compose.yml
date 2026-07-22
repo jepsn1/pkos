@@ -84,6 +84,9 @@ services:
     restart: unless-stopped
     env_file: .env
     networks: [web]
+    # Low CPU weight (default 1024): transcription uses the whole box when idle,
+    # but yields to voice STT/TTS (webui) and everything else under contention.
+    cpu_shares: 256
     volumes:
       - /srv/data/uploads/pkos:/uploads   # read audio the api saved
       - whisper-cache:/root/.cache        # keep the ~460MB model across restarts
