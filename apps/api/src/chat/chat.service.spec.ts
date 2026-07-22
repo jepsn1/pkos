@@ -14,7 +14,7 @@ import type {
   Message,
   NewMessage,
 } from './chat.repo';
-import { ChatService, deriveTitle } from './chat.service';
+import { ChatService, deriveTitle, retrievalQuery } from './chat.service';
 import type { LlmMessage, LlmProvider } from './llm.provider';
 
 /** Records every call; answers from a queue (falls back to a canned answer). */
@@ -239,7 +239,7 @@ describe('ChatService.chat', () => {
     expect(res.citations).toEqual([]);
     expect(repo.messages[1].citations).toEqual([]);
     const system = llm.calls[0][0].content;
-    expect(system).toContain('nothing relevant');
+    expect(system).toContain('knowledge base has nothing');
     expect(system).not.toContain('on-mercy.md');
   });
 
@@ -293,5 +293,27 @@ describe('deriveTitle', () => {
     const long = 'x'.repeat(200);
     expect(deriveTitle(long).length).toBe(80);
     expect(deriveTitle(long).endsWith('…')).toBe(true);
+  });
+});
+
+describe('retrievalQuery', () => {
+  it('folds recent turns into the query so a vague follow-up re-retrieves', () => {
+    const q = retrievalQuery('what else does it say?', [
+      { role: 'user', content: 'tell me about my note On Grace' },
+      { role: 'assistant', content: 'Your note On Grace says grace is unmerited favor…' },
+    ]);
+    expect(q).toContain('On Grace'); // topic anchor from history is present
+    expect(q).toContain('what else does it say?'); // current message included
+  });
+
+  it('truncates long turns and only keeps the last few', () => {
+    const history = Array.from({ length: 6 }, (_, i) => ({
+      role: 'user' as const,
+      content: `turn ${i} ` + 'x'.repeat(1000),
+    }));
+    const q = retrievalQuery('now', history);
+    expect(q).toContain('turn 5');
+    expect(q).not.toContain('turn 2'); // only last 3 turns
+    expect(q.length).toBeLessThan(2000); // truncated, not the full 6k
   });
 });

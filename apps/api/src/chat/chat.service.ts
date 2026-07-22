@@ -64,10 +64,23 @@ Broad questions about the user ("what do you know about me?") deserve a synthesi
 
 const SYSTEM_NO_HITS = `${SYSTEM_BASE}
 
-No relevant knowledge items were found for this question. Say honestly that you found
-nothing relevant in the knowledge base, and do not fabricate notes or citations. You may
-still answer briefly from general knowledge if that is clearly helpful, but be explicit
-that it does not come from the knowledge base.`;
+No NEW knowledge item matched this specific message. If this is a follow-up to
+something already discussed earlier in THIS conversation, just answer from what is
+already there — NEVER claim you lack access to, or can't find, a note you have
+already been talking about. Only when the topic is genuinely new AND has not come
+up should you say plainly that the knowledge base has nothing on it (you may then
+answer briefly from general knowledge, noting it's not from the vault). Never
+fabricate notes or citations.`;
+
+/**
+ * Retrieval query = the last few conversation turns (truncated) + this message, so
+ * a vague follow-up still re-retrieves the note under discussion. The current
+ * message is included last; recent turns add topic anchors without an LLM rewrite.
+ */
+export function retrievalQuery(message: string, history: LlmMessage[]): string {
+  const recent = history.slice(-3).map((m) => m.content.slice(0, 400));
+  return [...recent, message].join('\n');
+}
 
 @Injectable()
 export class ChatService {
@@ -148,7 +161,11 @@ export class ChatService {
     model?: string,
     think?: ThinkLevel,
   ): Promise<{ answer: string; citations: Citation[] }> {
-    const embedding = await this.embedder.embed(message);
+    // Retrieve on the recent conversation, not just this message: a vague
+    // follow-up ("what else does it say?") embeds to nothing on its own, so the
+    // note discussed a turn ago wouldn't re-surface and the model would wrongly
+    // claim it lacks access. Recent turns re-anchor retrieval on the real topic.
+    const embedding = await this.embedder.embed(retrievalQuery(message, history));
     const minScore = Number(process.env.RETRIEVAL_MIN_SCORE ?? DEFAULT_MIN_SCORE);
     const hits = (await this.knowledge.search(embedding, TOP_K)).filter(
       (h) => h.score >= minScore,
