@@ -342,6 +342,41 @@ describe('helpers', () => {
     for (const p of pieces) expect(p.length).toBeLessThanOrEqual(8);
   });
 
+  it('renders a quote as english + its verbatim original when they differ', () => {
+    const body = buildArticleBody(
+      {
+        title: 'T',
+        summary: 'S',
+        sections: [],
+        bibleReferences: [],
+        actionPoints: [],
+        keyQuotes: [
+          { original: 'Faderskab er en guddomlig idé.', english: 'Fatherhood is a divine idea.' },
+          { original: 'Same both', english: 'Same both' },
+        ],
+        tags: [],
+      },
+      'job-1',
+    );
+    expect(body).toContain('> Fatherhood is a divine idea.');
+    expect(body).toContain('*original:* Faderskab er en guddomlig idé.');
+    // when original === english, no duplicate "original:" line
+    expect(body).toContain('> Same both');
+    expect(body.match(/original:/g)?.length).toBe(1);
+  });
+
+  it('parseEnrichment reads key_quotes objects and tolerates plain strings', () => {
+    const obj = parseEnrichment(
+      JSON.stringify({
+        title: 'T',
+        summary: 'S',
+        key_quotes: [{ original: 'da', english: 'en' }, 'plain'],
+      }),
+    );
+    expect(obj.keyQuotes[0]).toEqual({ original: 'da', english: 'en' });
+    expect(obj.keyQuotes[1]).toEqual({ original: 'plain', english: 'plain' });
+  });
+
   it('buildArticleBody omits empty sections', () => {
     const body = buildArticleBody(
       {

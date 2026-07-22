@@ -29,7 +29,8 @@ export interface Enrichment {
   sections: { heading: string; notes: string[] }[];
   bibleReferences: string[];
   actionPoints: string[];
-  keyQuotes: string[];
+  /** Each quote: a verbatim span from the transcript + a faithful English translation. */
+  keyQuotes: { original: string; english: string }[];
   tags: string[];
 }
 
@@ -44,15 +45,23 @@ export interface EnrichResult {
  *  points and fragmentary quotes. */
 const BILINGUAL = `
 
-LANGUAGE & LIVE INTERPRETATION: Write the ENTIRE note — summary, section notes, action points, and key_quotes — in clear, natural ENGLISH, with no Danish (or other non-English) left in.
-This talk is likely live-interpreted: the speaker says a sentence, then an interpreter repeats it in the other language. When you recognize such an aligned pair (the same idea said twice), treat it as ONE point — never output it twice. Produce the English yourself by accurately translating what the ORIGINAL speaker said; you translate better than a rushed live interpreter, so do NOT copy the interpreter's wording (it is often poor) — use it only to confirm the meaning. Translate faithfully: never add, embellish, sharpen, or invent beyond what was actually said. Sentences that are not part of a pair: just translate them faithfully. Every key_quote must be a complete, meaningful English sentence, never a short repeated fragment.`;
+LANGUAGE & LIVE INTERPRETATION: Write the summary, section notes, and action points in clear, natural ENGLISH (no Danish or other non-English left in).
+This talk is likely live-interpreted: the speaker says a sentence, then an interpreter repeats it in the other language. When you recognize such an aligned pair (the same idea said twice), treat it as ONE point — never output it twice. For the notes/summary/actions, produce the English yourself by accurately translating what the ORIGINAL speaker said; you translate better than a rushed live interpreter, so do NOT copy the interpreter's wording (it is often poor) — use it only to confirm meaning. Translate faithfully: never add, embellish, sharpen, or invent beyond what was actually said. (key_quotes are handled by their own rule below and DO keep the original-language text.)`;
+
+/** Strict, verbatim rule for key_quotes so they can be cross-checked against the transcript. */
+const QUOTES_RULE = `
+key_quotes: pick a few of the most important quotes. Each is an object:
+  {"original": "...", "english": "..."}
+- "original" MUST be a SINGLE contiguous sentence copied VERBATIM from the transcript — exactly as it appears, character for character. Do NOT stitch two separate statements together, do NOT paraphrase, do NOT fix or improve the wording. It must be findable verbatim in the transcript.
+- "english" is a faithful translation of exactly that one sentence (if "original" is already English, copy it into "english" too).
+Choose complete, meaningful sentences. If you cannot find a clean verbatim sentence, leave key_quotes empty rather than inventing or combining.`;
 
 const ENRICH_SYSTEM = `You are a careful note-taker turning a sermon transcript into DETAILED study notes for a personal knowledge base. Capture what was actually preached — never invent content.
 
 Produce thorough NOTES, not a thin summary:
 - "sections" are the main points of the sermon, in order. For each, a short heading AND 2-5 bullet notes explaining what was actually said under it — the argument, the examples used, how it was developed — enough that someone who missed the sermon understands the point. Never one-word or one-line points.
 - "bible_references" MUST list EVERY scripture the preacher reads or cites — this is the most important field, never omit any. Give them as standard ENGLISH book names, normalizing Danish names: 1./2./3./4./5. Mosebog = Genesis/Exodus/Leviticus/Numbers/Deuteronomy, Salmerne = Psalms, Ordsprogene = Proverbs, Åbenbaringen = Revelation, Prædikeren = Ecclesiastes, etc. If a reference is garbled in the transcript, use the surrounding context to give the correct book+chapter, or omit it rather than guessing wrong.
-- "key_quotes" are a few complete, memorable sentences, verbatim.
+- "key_quotes": see the strict verbatim rule below.
 
 Respond with ONLY a JSON object, no other text:
 {
@@ -61,16 +70,16 @@ Respond with ONLY a JSON object, no other text:
   "sections": [{"heading": "the point", "notes": ["detailed note about what was said", "another detail"]}],
   "bible_references": ["John 3:16", "1 Corinthians 13:4-7"],
   "action_points": ["practical application the preacher called for", "..."],
-  "key_quotes": ["a complete memorable sentence, verbatim", "..."],
+  "key_quotes": [{"original": "verbatim sentence from the transcript", "english": "faithful translation"}],
   "tags": ["lowercase", "topic", "tags"]
 }
-Use empty arrays when a field genuinely has nothing.${BILINGUAL}`;
+Use empty arrays when a field genuinely has nothing.${BILINGUAL}${QUOTES_RULE}`;
 
 const ENRICH_SYSTEM_GENERAL = `You are a careful note-taker turning a video/talk transcript into DETAILED study notes for a personal knowledge base. Capture what was actually said — never invent content.
 
 Produce thorough NOTES, not a thin summary:
 - "sections" are the main points of the talk, in order. For each, a short heading AND 2-5 bullet notes explaining what was actually said under it — the argument, examples, how it developed — enough that someone who missed it understands. Never one-liners.
-- "key_quotes" are a few complete, memorable sentences, verbatim.
+- "key_quotes": see the strict verbatim rule below.
 
 Respond with ONLY a JSON object, no other text:
 {
@@ -79,10 +88,10 @@ Respond with ONLY a JSON object, no other text:
   "sections": [{"heading": "the point", "notes": ["detailed note", "another detail"]}],
   "bible_references": [],
   "action_points": ["concrete takeaway or thing to do", "..."],
-  "key_quotes": ["a complete memorable sentence, verbatim", "..."],
+  "key_quotes": [{"original": "verbatim sentence from the transcript", "english": "faithful translation"}],
   "tags": ["lowercase", "topic", "tags"]
 }
-Use empty arrays when a field genuinely has nothing. Leave bible_references empty unless the speaker actually cites scripture.${BILINGUAL}`;
+Use empty arrays when a field genuinely has nothing. Leave bible_references empty unless the speaker actually cites scripture.${BILINGUAL}${QUOTES_RULE}`;
 
 const CONDENSE_SYSTEM = `You condense one part of a long transcript into DENSE study notes (no JSON).
 Preserve in detail: each point and HOW it was argued (examples, reasoning), EVERY
@@ -308,9 +317,16 @@ export function buildArticleBody(e: Enrichment, jobId: string, sourceUrl?: strin
     sections.push(`## Action Points\n\n${bullets(e.actionPoints)}`);
   }
   if (e.keyQuotes.length) {
-    sections.push(
-      `## Key Quotes\n\n${e.keyQuotes.map((q) => `> ${q}`).join('\n\n')}`,
-    );
+    const quotes = e.keyQuotes
+      .map((q) => {
+        const en = q.english.trim();
+        const orig = q.original.trim();
+        return orig && en && orig !== en
+          ? `> ${en}\n>\n> — *original:* ${orig}`
+          : `> ${orig || en}`;
+      })
+      .join('\n\n');
+    sections.push(`## Key Quotes\n\n${quotes}`);
   }
   sections.push(
     `## Transcript\n\nFull transcript on sermon job \`${jobId}\` — \`GET /api/sermons/${jobId}\`.`,
@@ -339,9 +355,26 @@ export function parseEnrichment(raw: string): Enrichment {
     sections: parseSections(d.sections),
     bibleReferences: strings(d.bible_references ?? d.bibleReferences),
     actionPoints: strings(d.action_points ?? d.actionPoints),
-    keyQuotes: strings(d.key_quotes ?? d.keyQuotes),
+    keyQuotes: parseQuotes(d.key_quotes ?? d.keyQuotes),
     tags: strings(d.tags),
   };
+}
+
+/** Parse key_quotes as {original, english} — tolerant of plain strings (fallback). */
+function parseQuotes(value: unknown): { original: string; english: string }[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((q) => {
+      if (typeof q === 'string') {
+        const s = q.trim();
+        return { original: s, english: s };
+      }
+      const o = (q ?? {}) as Record<string, unknown>;
+      const original = typeof o.original === 'string' ? o.original.trim() : '';
+      const english = typeof o.english === 'string' ? o.english.trim() : '';
+      return { original: original || english, english: english || original };
+    })
+    .filter((q) => q.original || q.english);
 }
 
 /** Parse "sections": [{heading, notes[]}] — tolerant of a missing/loose shape. */
