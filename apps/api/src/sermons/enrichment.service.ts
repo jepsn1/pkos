@@ -56,6 +56,10 @@ key_quotes: pick a few of the most important quotes. Each is an object:
 - "english" is a faithful translation of exactly that one sentence (if "original" is already English, copy it into "english" too).
 Choose complete, meaningful sentences. If you cannot find a clean verbatim sentence, leave key_quotes empty rather than inventing or combining.`;
 
+/** Names get misheard by transcription — trust the title metadata over the transcript. */
+const NAMES_RULE = `
+NAMES: The transcript often MISHEARS names. Trusted metadata (title/date) is provided with the transcript — use it for the speaker's name and correct spellings, and NEVER call the speaker by a name that appears only in the transcript. If the speaker's name isn't in the metadata and the transcript is unclear, write "the speaker" rather than guessing a name.`;
+
 const ENRICH_SYSTEM = `You are a careful note-taker turning a sermon transcript into DETAILED study notes for a personal knowledge base. Capture what was actually preached — never invent content.
 
 Produce thorough NOTES, not a thin summary:
@@ -73,7 +77,7 @@ Respond with ONLY a JSON object, no other text:
   "key_quotes": [{"original": "verbatim sentence from the transcript", "english": "faithful translation"}],
   "tags": ["lowercase", "topic", "tags"]
 }
-Use empty arrays when a field genuinely has nothing.${BILINGUAL}${QUOTES_RULE}`;
+Use empty arrays when a field genuinely has nothing.${BILINGUAL}${QUOTES_RULE}${NAMES_RULE}`;
 
 const ENRICH_SYSTEM_GENERAL = `You are a careful note-taker turning a video/talk transcript into DETAILED study notes for a personal knowledge base. Capture what was actually said — never invent content.
 
@@ -91,7 +95,7 @@ Respond with ONLY a JSON object, no other text:
   "key_quotes": [{"original": "verbatim sentence from the transcript", "english": "faithful translation"}],
   "tags": ["lowercase", "topic", "tags"]
 }
-Use empty arrays when a field genuinely has nothing. Leave bible_references empty unless the speaker actually cites scripture.${BILINGUAL}${QUOTES_RULE}`;
+Use empty arrays when a field genuinely has nothing. Leave bible_references empty unless the speaker actually cites scripture.${BILINGUAL}${QUOTES_RULE}${NAMES_RULE}`;
 
 const CONDENSE_SYSTEM = `You condense one part of a long transcript into DENSE study notes (no JSON).
 Preserve in detail: each point and HOW it was argued (examples, reasoning), EVERY
@@ -220,7 +224,7 @@ export class EnrichmentService implements OnApplicationBootstrap, OnModuleDestro
     try {
       if (!job.transcript?.trim()) throw new Error('job has no transcript');
       const preset = presetFor(job.style);
-      const enrichment = await this.generate(job.transcript, preset.system);
+      const enrichment = await this.generate(job.transcript, preset.system, metaContext(job));
 
       const title = job.title?.trim() || enrichment.title;
       const date = job.sermonDate ?? new Date().toISOString().slice(0, 10);
@@ -249,7 +253,7 @@ export class EnrichmentService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /** Full transcript when it fits; condense pieces first when it does not. */
-  private async generate(transcript: string, system: string): Promise<Enrichment> {
+  private async generate(transcript: string, system: string, context = ''): Promise<Enrichment> {
     const input =
       transcript.length <= this.inputMaxChars
         ? transcript
@@ -259,7 +263,7 @@ export class EnrichmentService implements OnApplicationBootstrap, OnModuleDestro
         await this.llm.chat(
           [
             { role: 'system', content: system },
-            { role: 'user', content: `Transcript:\n\n${input}` },
+            { role: 'user', content: `${context}Transcript:\n\n${input}` },
           ],
           undefined,
           undefined,
@@ -297,6 +301,16 @@ export class EnrichmentService implements OnApplicationBootstrap, OnModuleDestro
     // One pass is enough in practice; guard against a chatty model anyway.
     return notes.join('\n\n').slice(0, this.inputMaxChars);
   }
+}
+
+/** Trusted metadata block prepended to the transcript so the LLM gets names right. */
+function metaContext(job: SermonJob): string {
+  const lines: string[] = [];
+  if (job.title?.trim()) lines.push(`- Title: ${job.title.trim()}`);
+  if (job.sermonDate) lines.push(`- Date: ${job.sermonDate}`);
+  if (job.sourceUrl) lines.push(`- Source: ${job.sourceUrl}`);
+  if (!lines.length) return '';
+  return `TRUSTED METADATA for this talk (correct; the transcript may mishear names — prefer this for the speaker's name):\n${lines.join('\n')}\n\n`;
 }
 
 /** Markdown article body per PRD: all generated fields + pointer to the job. */
