@@ -86,7 +86,10 @@ class YtDlpDownloader:
     def download(self, url: str, job_id: str) -> DownloadResult:
         out_tmpl = os.path.join(self.uploads, f"{job_id}.%(ext)s")
         # --print-json emits the video's metadata on stdout while extracting audio.
-        cmd = ["yt-dlp", "-x", "--audio-format", "mp3", "--no-playlist", "--print-json"]
+        # --remote-components ejs:github: fetch the EJS solver script yt-dlp runs on
+        # Deno to beat YouTube's n-challenge (else only thumbnails are available).
+        cmd = ["yt-dlp", "-x", "--audio-format", "mp3", "--no-playlist",
+               "--print-json", "--remote-components", "ejs:github"]
         if self.cookies:
             cmd += ["--cookies", self.cookies]
         cmd += ["-o", out_tmpl, url]

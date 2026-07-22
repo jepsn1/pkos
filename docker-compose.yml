@@ -89,7 +89,9 @@ services:
       - whisper-cache:/root/.cache        # keep the ~460MB model across restarts
       # yt-dlp cookies.txt to get past YouTube's "confirm you're not a bot" wall.
       # Drop a cookies.txt in /srv/data/ytdlp (YTDLP_COOKIES=/ytdlp/cookies.txt).
-      - /srv/data/ytdlp:/ytdlp:ro
+      # NOT read-only: yt-dlp rewrites the file with refreshed session cookies,
+      # which also extends how long they stay valid.
+      - /srv/data/ytdlp:/ytdlp
 
   ollama:
     image: ollama/ollama:rocm
