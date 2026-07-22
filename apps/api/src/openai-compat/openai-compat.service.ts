@@ -279,12 +279,31 @@ export class OpenAiCompatService {
  * clean line; set COMPAT_SURFACE_ERRORS=false to hide them and show a generic note.
  */
 export function errorReply(err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err);
-  console.error('[pkos] request failed:', err);
+  const raw = err instanceof Error ? err.message : String(err);
+  console.error('[pkos] request failed:', err); // full detail (incl. any payload) stays in the logs
   if (process.env.COMPAT_SURFACE_ERRORS === 'false') {
     return '⚠️ Something went wrong handling that — check the server logs.';
   }
-  return `⚠️ **pkos error:** ${msg}`;
+  return `⚠️ **pkos error:** ${humanizeError(raw)}`;
+}
+
+/**
+ * Make a raw error safe + meaningful to show in chat. Two jobs: (1) explain the
+ * common local-model failure in plain words, (2) NEVER flood the chat with a huge
+ * payload — ollama's tool-parse error embeds the entire malformed tool call (a
+ * whole note body), which is what made a past error "look off". Full detail is
+ * still logged server-side.
+ */
+export function humanizeError(raw: string): string {
+  // gpt-oss occasionally emits invalid JSON for a tool call (esp. a large note
+  // body with newlines/quotes/em-dashes) → ollama can't parse it and returns the
+  // raw payload in the error. Explain + guide instead of dumping it.
+  if (/error parsing tool call|parsing tool call/i.test(raw)) {
+    return "the model produced a malformed tool call (usually a note too large/complex to save in one step), so nothing was saved. Try again, or ask for a shorter note.";
+  }
+  // Bound anything else so a long payload can never flood the reply.
+  const oneLine = raw.replace(/\s+/g, ' ').trim();
+  return oneLine.length > 200 ? `${oneLine.slice(0, 200)}…` : oneLine;
 }
 
 /** Markdown "Sources:" footer so citations survive any OpenAI-speaking client. */

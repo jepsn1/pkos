@@ -6,6 +6,7 @@ import type { ChatService } from '../chat/chat.service';
 import type { LlmMessage } from '../chat/llm.provider';
 import {
   extractImageParts,
+  humanizeError,
   MODEL_ID,
   OpenAiCompatService,
   parseMessages,
@@ -270,6 +271,27 @@ describe('complete (ChatService → OpenAI translation)', () => {
     } finally {
       delete process.env.COMPAT_SOURCES_FOOTER;
     }
+  });
+});
+
+describe('humanizeError', () => {
+  it('replaces the giant malformed-tool-call payload with a short, helpful line', () => {
+    const raw =
+      "ollama chat stream error: error parsing tool call: raw='{\"markdown\":\"" +
+      'x'.repeat(3000) +
+      '"},"title":"T"}\', err=invalid character';
+    const out = humanizeError(raw);
+    expect(out).not.toContain('xxxx'); // payload not dumped
+    expect(out.length).toBeLessThan(200);
+    expect(out).toMatch(/malformed tool call|nothing was saved/i);
+  });
+
+  it('truncates any other long error so it can never flood the chat', () => {
+    expect(humanizeError('boom ' + 'y'.repeat(500)).length).toBeLessThanOrEqual(201);
+  });
+
+  it('passes short errors through unchanged', () => {
+    expect(humanizeError('ollama down')).toBe('ollama down');
   });
 });
 
