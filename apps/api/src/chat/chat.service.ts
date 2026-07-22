@@ -10,6 +10,7 @@ import { EMBEDDING_PROVIDER, type EmbeddingProvider } from '../knowledge/embeddi
 import { KnowledgeToolsService } from '../knowledge/knowledge-tools.service';
 import { KNOWLEDGE_REPO, type KnowledgeRepo, type SearchHit } from '../knowledge/knowledge.repo';
 import { VaultService } from '../knowledge/vault.service';
+import { MediaToolsService } from '../sermons/media-tools.service';
 import { WebSearchToolService } from '../web-search/web-search-tools.service';
 import {
   CHAT_REPO,
@@ -80,11 +81,17 @@ export class ChatService {
     @Optional() private readonly fitness?: FitnessToolsService,
     @Optional() private readonly knowledgeTools?: KnowledgeToolsService,
     @Optional() private readonly webSearch?: WebSearchToolService,
+    @Optional() private readonly mediaTools?: MediaToolsService,
   ) {}
 
   /** Every tool-exposing service that is wired in (each is optional). */
   private toolsets(): ToolSet[] {
-    const sets: Array<ToolSet | undefined> = [this.fitness, this.knowledgeTools, this.webSearch];
+    const sets: Array<ToolSet | undefined> = [
+      this.fitness,
+      this.knowledgeTools,
+      this.webSearch,
+      this.mediaTools,
+    ];
     return sets.filter((s): s is ToolSet => s !== undefined);
   }
 

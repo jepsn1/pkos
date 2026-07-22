@@ -8,6 +8,7 @@ import {
   TRANSCRIPT_SEARCH,
 } from './sermons.repo';
 import { MediaController } from './media.controller';
+import { MediaToolsService } from './media-tools.service';
 import { SermonsController } from './sermons.controller';
 import { SermonsService, UPLOADS_PATH } from './sermons.service';
 
@@ -20,10 +21,11 @@ const uploadsPath =
   controllers: [SermonsController, MediaController],
   providers: [
     SermonsService,
+    MediaToolsService,
     { provide: UPLOADS_PATH, useValue: uploadsPath },
     { provide: SERMON_REPO, useValue: new DrizzleSermonRepo(db) },
     { provide: TRANSCRIPT_SEARCH, useValue: new DrizzleTranscriptSearch(db) },
   ],
-  exports: [TRANSCRIPT_SEARCH, SERMON_REPO],
+  exports: [TRANSCRIPT_SEARCH, SERMON_REPO, MediaToolsService],
 })
 export class SermonsModule {}
