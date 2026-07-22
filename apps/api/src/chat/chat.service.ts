@@ -28,6 +28,7 @@ import {
   type LlmReply,
   type LlmTool,
   type LlmToolCall,
+  type ThinkLevel,
 } from './llm.provider';
 
 /** A service exposing LLM tools: definitions, executor, and routing rules. */
@@ -138,6 +139,7 @@ export class ChatService {
     onToken?: (token: string) => void,
     onThinking?: (token: string) => void,
     model?: string,
+    think?: ThinkLevel,
   ): Promise<{ answer: string; citations: Citation[] }> {
     const embedding = await this.embedder.embed(message);
     const minScore = Number(process.env.RETRIEVAL_MIN_SCORE ?? DEFAULT_MIN_SCORE);
@@ -172,7 +174,7 @@ export class ChatService {
     const streaming = onToken && this.llm.chatStream;
     let emitted = '';
     const callLlm = async (): Promise<LlmReply> => {
-      if (!streaming) return toReply(await this.llm.chat(llmMessages, tools, model));
+      if (!streaming) return toReply(await this.llm.chat(llmMessages, tools, model, think));
       const filter = new ThinkFilter((t) => {
         emitted += t;
         onToken!(t);
@@ -183,6 +185,7 @@ export class ChatService {
         (tok) => filter.push(tok),
         onThinking,
         model,
+        think,
       );
       filter.end();
       return reply;

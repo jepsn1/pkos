@@ -23,16 +23,17 @@ function serviceWith(
   answer = 'Grace is unmerited favor.',
   tokens: string[] = [answer],
 ) {
-  const calls: Array<{ message: string; history: LlmMessage[]; model?: string }> = [];
+  const calls: Array<{ message: string; history: LlmMessage[]; think?: boolean | string }> = [];
   const chat = {
     answer: async (
       message: string,
       history: LlmMessage[],
       onToken?: (token: string) => void,
       _onThinking?: (token: string) => void,
-      model?: string,
+      _model?: string,
+      think?: boolean | string,
     ) => {
-      calls.push({ message, history, model });
+      calls.push({ message, history, think });
       if (onToken) for (const t of tokens) onToken(t);
       return { answer, citations };
     },
@@ -41,50 +42,47 @@ function serviceWith(
 }
 
 describe('listModels', () => {
-  it('exposes the labeled model tiers, default first, each with a friendly name', () => {
+  it('exposes the reasoning-level presets, default (Fast) first, with plain names', () => {
     const { service } = serviceWith([]);
     const res = service.listModels();
     expect(res.object).toBe('list');
     expect(res.data.length).toBeGreaterThan(1);
-    expect(res.data[0]).toMatchObject({ id: 'pkos-smart', object: 'model' });
-    for (const m of res.data) {
-      expect(m.id).toMatch(/^pkos-/);
-      expect(typeof m.name).toBe('string');
-      expect(m.name.length).toBeGreaterThan(0);
-    }
+    expect(res.data[0]).toMatchObject({ id: 'pkos-fast', object: 'model', name: 'Fast' });
+    expect(res.data.map((m) => m.name)).toEqual(['Fast', 'Balanced', 'Deep']);
+    for (const m of res.data) expect(m.id).toMatch(/^pkos-/);
   });
 });
 
-describe('model selection', () => {
-  it('routes the chosen id to its ollama model and echoes the id back', async () => {
+describe('reasoning-level selection', () => {
+  it('maps the chosen preset to its think level and echoes the id back', async () => {
     const { service, calls } = serviceWith([]);
     const res = await service.complete({
-      model: 'pkos-fast',
+      model: 'pkos-deep',
       messages: [{ role: 'user', content: 'hi' }],
     });
-    expect(calls[0].model).toBe('qwen3:4b');
-    expect(res.model).toBe('pkos-fast');
+    expect(calls[0].think).toBe('high');
+    expect(res.model).toBe('pkos-deep');
   });
 
-  it('falls back to the default model for a legacy/unknown id', async () => {
+  it('falls back to the default preset (Fast/low) for a legacy/unknown id', async () => {
     const { service, calls } = serviceWith([]);
     const res = await service.complete({
       model: 'pkos',
       messages: [{ role: 'user', content: 'hi' }],
     });
-    expect(calls[0].model).toBe('gpt-oss:20b');
-    expect(res.model).toBe('pkos-smart');
+    expect(calls[0].think).toBe('low');
+    expect(res.model).toBe('pkos-fast');
   });
 
-  it('streaming routes the chosen model too', async () => {
+  it('streaming applies the chosen think level too', async () => {
     const { service, calls } = serviceWith([]);
     const chunks: CompletionChunk[] = [];
     await service.streamCompletion(
-      { model: 'pkos-reasoner', messages: [{ role: 'user', content: 'hi' }] },
+      { model: 'pkos-balanced', messages: [{ role: 'user', content: 'hi' }] },
       (c) => chunks.push(c),
     );
-    expect(calls[0].model).toBe('qwen3:14b');
-    expect(chunks[0].model).toBe('pkos-reasoner');
+    expect(calls[0].think).toBe('medium');
+    expect(chunks[0].model).toBe('pkos-balanced');
   });
 });
 
@@ -131,7 +129,7 @@ describe('complete (ChatService → OpenAI translation)', () => {
     });
 
     expect(calls).toEqual([
-      { message: 'what have I collected about grace?', history: [], model: 'gpt-oss:20b' },
+      { message: 'what have I collected about grace?', history: [], think: 'low' },
     ]);
     expect(res.object).toBe('chat.completion');
     expect(res.id).toMatch(/^chatcmpl-/);

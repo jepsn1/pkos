@@ -2,26 +2,26 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Citation } from '../chat/chat.repo';
 import { ChatService } from '../chat/chat.service';
-import type { LlmMessage } from '../chat/llm.provider';
+import type { LlmMessage, ThinkLevel } from '../chat/llm.provider';
 
 /**
- * Chat models shown in Open WebUI's dropdown. `id` round-trips (webui sends the
- * chosen id back as `model`); `name` is the friendly dropdown label; `ollama` is
- * the real model routed to. Only models that fit the 16GB card are listed
- * (qwen3:30b-a3b @18GB would spill to CPU). First entry = default/fallback.
+ * Dropdown presets shown in Open WebUI. Same underlying model (gpt-oss via
+ * LLM_MODEL) for all — only the reasoning effort changes. `id` round-trips
+ * (webui sends the chosen id back as `model`); `name` is the dropdown label.
+ * First entry = default/fallback (low = voice-friendly, matches prior behavior).
  */
 export interface CompatModel {
   id: string;
   name: string;
-  ollama: string;
+  think: ThinkLevel;
 }
 export const COMPAT_MODELS: CompatModel[] = [
-  { id: 'pkos-smart', name: '🧠 Smart · gpt-oss 20B — best all-round (default)', ollama: 'gpt-oss:20b' },
-  { id: 'pkos-reasoner', name: '🤔 Reasoner · qwen3 14B — slower, thinks step-by-step', ollama: 'qwen3:14b' },
-  { id: 'pkos-fast', name: '⚡ Fast · qwen3 4B — quickest, lighter/less capable', ollama: 'qwen3:4b' },
+  { id: 'pkos-fast', name: 'Fast', think: 'low' },
+  { id: 'pkos-balanced', name: 'Balanced', think: 'medium' },
+  { id: 'pkos-deep', name: 'Deep', think: 'high' },
 ];
 
-/** Resolve a requested id to a model; legacy 'pkos'/unknown/missing → default. */
+/** Resolve a requested id to a preset; legacy 'pkos'/unknown/missing → default. */
 export function resolveModel(id?: string): CompatModel {
   return COMPAT_MODELS.find((m) => m.id === id) ?? COMPAT_MODELS[0];
 }
@@ -100,8 +100,15 @@ export class OpenAiCompatService {
 
   async complete(body: CompletionRequest): Promise<CompletionResponse> {
     const { message, history } = parseMessages(body);
-    const model = resolveModel(body.model);
-    const { answer, citations } = await this.chat.answer(message, history, undefined, undefined, model.ollama);
+    const preset = resolveModel(body.model);
+    const { answer, citations } = await this.chat.answer(
+      message,
+      history,
+      undefined,
+      undefined,
+      undefined,
+      preset.think,
+    );
     // Footer off by default (voice-first, matches the streaming path); opt in via env.
     const content =
       process.env.COMPAT_SOURCES_FOOTER === 'true' ? withSources(answer, citations) : answer;
@@ -109,7 +116,7 @@ export class OpenAiCompatService {
       id: `chatcmpl-${randomUUID()}`,
       object: 'chat.completion',
       created: Math.floor(Date.now() / 1000),
-      model: model.id,
+      model: preset.id,
       choices: [
         {
           index: 0,
@@ -134,12 +141,12 @@ export class OpenAiCompatService {
     send: (chunk: CompletionChunk) => void,
   ): Promise<void> {
     const { message, history } = parseMessages(body);
-    const model = resolveModel(body.model);
+    const preset = resolveModel(body.model);
     const base = {
       id: `chatcmpl-${randomUUID()}`,
       object: 'chat.completion.chunk' as const,
       created: Math.floor(Date.now() / 1000),
-      model: model.id,
+      model: preset.id,
     };
     const chunk = (
       delta: CompletionChunk['choices'][0]['delta'],
@@ -177,7 +184,8 @@ export class OpenAiCompatService {
               send(chunk({ content: thought }));
             }
           : undefined,
-        model.ollama,
+        undefined,
+        preset.think,
       );
       closeThink();
       if (emitFooter) {

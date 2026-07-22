@@ -33,8 +33,16 @@ export interface LlmReply {
 /** Chat-completion LLM. Real impl calls ollama; tests inject a fake.
  *  Without `tools` the reply is a plain string (legacy behavior); with `tools`
  *  it is an LlmReply that may carry tool calls. */
+/** Reasoning effort: gpt-oss takes 'low'|'medium'|'high'; qwen3 takes a boolean. */
+export type ThinkLevel = boolean | string;
+
 export interface LlmProvider {
-  chat(messages: LlmMessage[], tools?: LlmTool[], model?: string): Promise<string | LlmReply>;
+  chat(
+    messages: LlmMessage[],
+    tools?: LlmTool[],
+    model?: string,
+    think?: ThinkLevel,
+  ): Promise<string | LlmReply>;
   /**
    * Streaming variant: `onToken` receives content deltas as they arrive; the
    * resolved LlmReply is the assembled final reply (content + tool_calls).
@@ -49,6 +57,7 @@ export interface LlmProvider {
     onToken: (token: string) => void,
     onThinking?: (token: string) => void,
     model?: string,
+    think?: ThinkLevel,
   ): Promise<LlmReply>;
 }
 
@@ -174,6 +183,7 @@ export class OllamaLlmProvider implements LlmProvider {
     messages: LlmMessage[],
     tools?: LlmTool[],
     model?: string,
+    think?: ThinkLevel,
   ): Promise<string | LlmReply> {
     const base = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
     model = model ?? process.env.LLM_MODEL ?? 'qwen3:14b';
@@ -184,7 +194,7 @@ export class OllamaLlmProvider implements LlmProvider {
         model,
         messages: messages.map(toOllamaMessage),
         stream: false,
-        think: LLM_THINK,
+        think: think ?? LLM_THINK,
         options: { num_ctx: LLM_NUM_CTX, num_predict: LLM_NUM_PREDICT },
         ...(tools?.length
           ? { tools: tools.map((t) => ({ type: 'function', function: t })) }
@@ -225,6 +235,7 @@ export class OllamaLlmProvider implements LlmProvider {
     onToken: (token: string) => void,
     onThinking?: (token: string) => void,
     model?: string,
+    think?: ThinkLevel,
   ): Promise<LlmReply> {
     const base = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
     model = model ?? process.env.LLM_MODEL ?? 'qwen3:14b';
@@ -235,7 +246,7 @@ export class OllamaLlmProvider implements LlmProvider {
         model,
         messages: messages.map(toOllamaMessage),
         stream: true,
-        think: LLM_THINK,
+        think: think ?? LLM_THINK,
         options: { num_ctx: LLM_NUM_CTX, num_predict: LLM_NUM_PREDICT },
         ...(tools?.length
           ? { tools: tools.map((t) => ({ type: 'function', function: t })) }
