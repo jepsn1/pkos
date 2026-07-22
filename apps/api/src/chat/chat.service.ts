@@ -120,7 +120,11 @@ export class ChatService {
       this.knowledgeTools,
       this.webSearch,
       this.mediaTools,
-      this.visionTools,
+      // Vision is dormant by default: local VLMs that fit the 16GB card (7b) can't
+      // reliably read pen marks / handwriting, and 32b is too slow. Attached images
+      // are embedded as a reference instead (the model is told NOT to transcribe
+      // them). Kept wired for re-enable via VISION_ENABLED once hardware allows.
+      process.env.VISION_ENABLED === 'true' ? this.visionTools : undefined,
     ];
     return sets.filter((s): s is ToolSet => s !== undefined);
   }
@@ -201,16 +205,10 @@ export class ChatService {
       citations.push({ path: n.path, title: n.title, via: 'graph', relation: relationLabel(n) });
     }
 
-    // gpt-oss can't see images; tell it one is attached so it can route to
-    // make_note_from_image when (and only when) the user asks to note it.
-    const userContent =
-      images.length > 0
-        ? `${message}\n\n[System: ${images.length} image(s) are attached to THIS message. The vision tool make_note_from_image can read them; use it only if the user is asking you to make/save a note from the image.]`
-        : message;
     const llmMessages: LlmMessage[] = [
       { role: 'system', content: await this.systemPrompt(hits, neighbors) },
       ...history,
-      { role: 'user', content: userContent },
+      { role: 'user', content: message },
     ];
     const ctx: ToolContext = { images };
     // Planner: all wired toolsets (fitness, knowledge) are offered on every turn;

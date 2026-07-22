@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { RequestImage, ToolContext } from '../chat/chat.service';
 import type { LlmTool, LlmToolCall } from '../chat/llm.provider';
 import { KnowledgeService } from './knowledge.service';
 import type { KnowledgeItem } from './knowledge.repo';
@@ -113,12 +114,12 @@ export class KnowledgeToolsService {
   }
 
   /** Run one tool call; result (or {error}) JSON-serialized for the tool message. */
-  async execute(call: LlmToolCall): Promise<string> {
+  async execute(call: LlmToolCall, ctx?: ToolContext): Promise<string> {
     try {
       const args = (call.arguments ?? {}) as Args;
       switch (call.name) {
         case 'save_note':
-          return JSON.stringify(await this.saveNote(args));
+          return JSON.stringify(await this.saveNote(args, ctx?.images ?? []));
         case 'read_note':
           return JSON.stringify(await this.readNote(args));
         case 'list_notes':
@@ -134,9 +135,9 @@ export class KnowledgeToolsService {
     }
   }
 
-  private async saveNote(args: Args) {
+  private async saveNote(args: Args, images: RequestImage[] = []) {
     const title = requiredString(args.title, 'title');
-    const markdown = requiredString(args.markdown, 'markdown');
+    const markdown = withImageEmbeds(requiredString(args.markdown, 'markdown'), images);
     const folder = optionalFolder(args.folder);
     const tags = optionalTags(args.tags);
     const summary = optionalString(args.summary, 'summary');
@@ -244,6 +245,19 @@ export class KnowledgeToolsService {
     const notes = items.slice(0, LIST_LIMIT).map(cite);
     return { count: notes.length, notes };
   }
+}
+
+/**
+ * Prepend `![](url)` embeds for any image attached this turn that the model didn't
+ * already reference — so a dictated note reliably keeps its photo as a visual
+ * reference (vision is dormant; the model writes the text, we attach the image).
+ * Dedup-safe: an already-embedded URL is skipped, so no doubles.
+ */
+function withImageEmbeds(markdown: string, images: RequestImage[]): string {
+  const embeds = images
+    .filter((im) => !markdown.includes(im.url))
+    .map((im) => `![](${im.url})`);
+  return embeds.length ? `${embeds.join('\n')}\n\n${markdown}` : markdown;
 }
 
 /** A note reference the assistant can quote or feed back into read_note. */

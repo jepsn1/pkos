@@ -112,6 +112,29 @@ describe('save_note', () => {
     ]);
   });
 
+  it('auto-embeds an image attached this turn at the top of the note (dedup-safe)', async () => {
+    const img = { url: 'http://pkos/api/attachments/x', mime: 'image/jpeg', base64: 'QUJD' };
+
+    // model wrote only the dictated text -> we prepend the embed
+    await service.execute(
+      { name: 'save_note', arguments: { title: 'Paper note', markdown: 'My dictated note.' } },
+      { images: [img] },
+    );
+    expect(knowledge.ingested[0].markdown).toBe(
+      '![](http://pkos/api/attachments/x)\n\nMy dictated note.',
+    );
+
+    // model already embedded it -> no duplicate
+    await service.execute(
+      {
+        name: 'save_note',
+        arguments: { title: 'Paper note 2', markdown: 'Text ![](http://pkos/api/attachments/x) here.' },
+      },
+      { images: [img] },
+    );
+    expect(knowledge.ingested[1].markdown).toBe('Text ![](http://pkos/api/attachments/x) here.');
+  });
+
   it('minimal call: optionals omitted so ingest defaults apply', async () => {
     const res = await run('save_note', { title: 'A fact', markdown: 'Body.' });
     expect(res.saved).toBe(true);

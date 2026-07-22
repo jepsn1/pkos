@@ -183,10 +183,10 @@ describe('extractImageParts', () => {
 describe('inline images → ChatService', () => {
   it('stores the original and passes {url,mime,base64} through to answer()', async () => {
     const { attachments, stored } = attachmentsSpy();
-    const calls: Array<{ images?: unknown[] }> = [];
+    const calls: Array<{ message: string; images?: unknown[] }> = [];
     const chat = {
       answer: async (
-        _m: string,
+        message: string,
         _h: LlmMessage[],
         _t?: unknown,
         _th?: unknown,
@@ -194,7 +194,7 @@ describe('inline images → ChatService', () => {
         _think?: unknown,
         images?: unknown[],
       ) => {
-        calls.push({ images });
+        calls.push({ message, images });
         return { answer: 'saved', citations: [] };
       },
     } as unknown as ChatService;
@@ -216,6 +216,10 @@ describe('inline images → ChatService', () => {
     expect(calls[0].images).toEqual([
       { url: attachmentUrl('att-1'), mime: 'image/jpeg', base64: 'QUJD' },
     ]);
+    // the image rides along as an embeddable reference, and the model is told
+    // NOT to invent its contents (vision is dormant)
+    expect(calls[0].message).toContain(attachmentUrl('att-1'));
+    expect(calls[0].message).toMatch(/never transcribe|use only what the user/i);
   });
 
   it('passes no images when the store is not configured', async () => {

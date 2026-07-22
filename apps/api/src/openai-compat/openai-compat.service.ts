@@ -128,16 +128,22 @@ export class OpenAiCompatService {
   }
 
   /**
-   * Import any webui-attached files into our store and append their pkos URLs to
-   * the message, so the model embeds the portable URL when it saves a note.
-   * Best-effort — returns the message unchanged when nothing is attached or the
-   * import isn't configured.
+   * List every attachment on this turn — webui-imported files (docx etc.) AND
+   * inline images — and append their pkos URLs to the message so the model embeds
+   * the portable URL as a REFERENCE when it saves a note. Crucially it is told NOT
+   * to transcribe/describe image contents: with vision dormant we can't read them,
+   * so the note text must come from what the user said, and the image just rides
+   * along embedded. Best-effort — returns the message unchanged when nothing is
+   * attached or the import isn't configured.
    */
-  private async withImportedAttachments(message: string): Promise<string> {
+  private async withAttachmentContext(message: string, inlineImages: RequestImage[]): Promise<string> {
     const imported = (await this.webuiImport?.importFromMessage(message)) ?? [];
-    if (imported.length === 0) return message;
-    const lines = imported.map((f) => `- ${f.name} → ${f.url}`).join('\n');
-    return `${message}\n\n[System: the attached file(s) are saved in the user's file store. If you save a note about them, embed the original by URL (images as ![](url), other files as [name](url)):\n${lines}\n]`;
+    const lines = [
+      ...imported.map((f) => `- ${f.name} → ${f.url}`),
+      ...inlineImages.map((im, i) => `- image ${i + 1} → ${im.url}`),
+    ];
+    if (lines.length === 0) return message;
+    return `${message}\n\n[System: the user attached the file(s) below, saved in their store. Any attached IMAGE is embedded into the note automatically — you do NOT need to add it, and you CANNOT see inside it: never transcribe, quote, summarise, or guess an image's contents; write the note only from what the user themselves said. For non-image files, link them as [name](url) when relevant:\n${lines.join('\n')}\n]`;
   }
 
   listModels() {
@@ -159,7 +165,7 @@ export class OpenAiCompatService {
     let content: string;
     try {
       const images = await this.collectImages(body);
-      const augmented = await this.withImportedAttachments(message);
+      const augmented = await this.withAttachmentContext(message, images);
       const { answer, citations } = await this.chat.answer(
         augmented,
         history,
@@ -232,7 +238,7 @@ export class OpenAiCompatService {
     };
     try {
       const images = await this.collectImages(body);
-      const augmented = await this.withImportedAttachments(message);
+      const augmented = await this.withAttachmentContext(message, images);
       const { citations } = await this.chat.answer(
         augmented,
         history,

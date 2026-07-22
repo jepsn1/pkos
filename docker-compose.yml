@@ -47,12 +47,16 @@ services:
       OPENAI_API_BASE_URL: http://pkos-api:3002/v1
       OPENAI_API_KEY: ${OPENAI_COMPAT_API_KEY:?set OPENAI_COMPAT_API_KEY in .env}
       ENABLE_OLLAMA_API: "false"
-      # Pin voice-mode STT language — unset = whisper auto-detects per clip and
-      # flip-flops en/da on short audio. Change to "da" if you speak Danish to it.
-      WHISPER_LANGUAGE: "en"
-      # English-only whisper: faster + more accurate than multilingual "base" for
-      # en. Drop to "tiny.en" for more speed if accuracy holds. (was "base")
-      WHISPER_MODEL: "base.en"
+      # STT language auto-detect (no pin) so BOTH English and Danish work — a
+      # multilingual model detects per clip. Reading paper notes = longer clips,
+      # where auto-detect is reliable (flip-flop only bites very short audio).
+      # Pin "en" or "da" here if you ever want to force one.
+      WHISPER_LANGUAGE: ""
+      # Multilingual "small": needed for Danish, and actually MORE accurate on
+      # English than the old "base.en" (bigger model wins) — English isn't
+      # worsened by enabling Danish, just a bit more CPU/latency. Bump to "medium"
+      # for best Danish if you can tolerate ~10x slower CPU transcription. (was "base.en")
+      WHISPER_MODEL: "small"
       # Fixed JWT signing key — the image defaults it to empty and regenerates a
       # random one each start, logging everyone out on every restart. Pin it.
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?set WEBUI_SECRET_KEY in .env}
