@@ -1,8 +1,9 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Citation } from '../chat/chat.repo';
 import { ChatService } from '../chat/chat.service';
 import type { LlmMessage, ThinkLevel } from '../chat/llm.provider';
+import { WebuiImportService } from '../webui-import/webui-import.service';
 
 /**
  * Dropdown presets shown in Open WebUI. Same underlying model (gpt-oss via
@@ -83,7 +84,23 @@ export interface CompletionChunk {
  */
 @Injectable()
 export class OpenAiCompatService {
-  constructor(private readonly chat: ChatService) {}
+  constructor(
+    private readonly chat: ChatService,
+    @Optional() private readonly webuiImport?: WebuiImportService,
+  ) {}
+
+  /**
+   * Import any webui-attached files into our store and append their pkos URLs to
+   * the message, so the model embeds the portable URL when it saves a note.
+   * Best-effort — returns the message unchanged when nothing is attached or the
+   * import isn't configured.
+   */
+  private async withImportedAttachments(message: string): Promise<string> {
+    const imported = (await this.webuiImport?.importFromMessage(message)) ?? [];
+    if (imported.length === 0) return message;
+    const lines = imported.map((f) => `- ${f.name} → ${f.url}`).join('\n');
+    return `${message}\n\n[System: the attached file(s) are saved in the user's file store. If you save a note about them, embed the original by URL (images as ![](url), other files as [name](url)):\n${lines}\n]`;
+  }
 
   listModels() {
     return {
@@ -101,8 +118,9 @@ export class OpenAiCompatService {
   async complete(body: CompletionRequest): Promise<CompletionResponse> {
     const { message, history } = parseMessages(body);
     const preset = resolveModel(body.model);
+    const augmented = await this.withImportedAttachments(message);
     const { answer, citations } = await this.chat.answer(
-      message,
+      augmented,
       history,
       undefined,
       undefined,
@@ -168,8 +186,9 @@ export class OpenAiCompatService {
       }
     };
     try {
+      const augmented = await this.withImportedAttachments(message);
       const { citations } = await this.chat.answer(
-        message,
+        augmented,
         history,
         (token) => {
           closeThink();

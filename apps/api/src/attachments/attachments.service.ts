@@ -11,6 +11,13 @@ import {
 /** Root dir for blobs (host: /srv/data/uploads/pkos/attachments via compose). */
 export const ATTACHMENTS_PATH = 'ATTACHMENTS_PATH';
 
+/** Public URL a note references to embed/link a stored attachment. */
+export function attachmentUrl(id: string): string {
+  const base =
+    process.env.ATTACHMENTS_PUBLIC_BASE ?? `http://${process.env.TAILSCALE_IP ?? '127.0.0.1'}:3002`;
+  return `${base}/api/attachments/${id}`;
+}
+
 export interface StoredFile {
   buffer: Buffer;
   originalname: string;

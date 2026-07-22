@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { createReadStream } from 'node:fs';
-import { AttachmentsService, type StoredFile } from './attachments.service';
+import { AttachmentsService, attachmentUrl, type StoredFile } from './attachments.service';
 import { UPLOAD_PAGE_HTML } from './upload-page';
 
 /** Slice of express.Response we use (avoids a @types/express dependency). */
@@ -23,14 +23,6 @@ type Response = NodeJS.WritableStream & {
 
 /** Whole-file buffer cap (docs/slides/images; big enough for a fat pptx). */
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
-
-/** Public base for attachment URLs referenced from markdown (tailscale by default). */
-function publicBase(): string {
-  return (
-    process.env.ATTACHMENTS_PUBLIC_BASE ??
-    `http://${process.env.TAILSCALE_IP ?? '127.0.0.1'}:3002`
-  );
-}
 
 @Controller('attachments')
 export class AttachmentsController {
@@ -52,7 +44,7 @@ export class AttachmentsController {
       mime: a.mime,
       size: a.size,
       item_id: a.itemId,
-      url: `${publicBase()}/api/attachments/${a.id}`,
+      url: attachmentUrl(a.id),
     };
   }
 
@@ -74,7 +66,7 @@ export class AttachmentsController {
         filename: a.filename,
         mime: a.mime,
         size: a.size,
-        url: `${publicBase()}/api/attachments/${a.id}`,
+        url: attachmentUrl(a.id),
       })),
     };
   }
