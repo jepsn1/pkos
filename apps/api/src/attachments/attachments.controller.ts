@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   Param,
   Post,
   Query,
@@ -13,6 +14,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { createReadStream } from 'node:fs';
 import { AttachmentsService, type StoredFile } from './attachments.service';
+import { UPLOAD_PAGE_HTML } from './upload-page';
 
 /** Slice of express.Response we use (avoids a @types/express dependency). */
 type Response = NodeJS.WritableStream & {
@@ -52,6 +54,13 @@ export class AttachmentsController {
       item_id: a.itemId,
       url: `${publicBase()}/api/attachments/${a.id}`,
     };
+  }
+
+  // Declared before @Get(':id') so "upload" isn't captured as an :id param.
+  @Get('upload')
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  uploadPage(): string {
+    return UPLOAD_PAGE_HTML;
   }
 
   @Get()
