@@ -41,7 +41,10 @@ export interface EnrichResult {
  *  points and fragmentary quotes. */
 const BILINGUAL = `
 
-BILINGUAL / LIVE-INTERPRETED AUDIO: this transcript may be a talk where every statement is said twice — once by the speaker and once by an interpreter — in two different languages. The version that appears FIRST is the original speaker; the one immediately after is the interpreter's translation. This is decided by ORDER, not by a fixed language: the original may be Danish-then-English OR English-then-Danish — determine it from the transcript for each statement, never assume which language is primary. Treat a statement and its translation as ONE point (never output both). Take every key_quote VERBATIM from the ORIGINAL (first-spoken) version, as a complete, meaningful sentence — never a short repeated fragment. Write the summary, themes, and action points in English.`;
+LIVE-INTERPRETED AUDIO: parts of this transcript may be live-interpreted, where a sentence is spoken and then immediately repeated as a near-translation in the other language by an interpreter. This rule applies ONLY to such matched pairs — two adjacent sentences that clearly say the same thing in two languages:
+- collapse each pair to ONE point (never output both the sentence and its translation), and
+- take the quote from the FIRST sentence of the pair (the original speaker); the second is the interpreter.
+Do NOT infer the talk's overall language from the intro or from any sentence that is NOT part of a matched pair — greetings and introductions may be in a different language and are not translations. Every key_quote must be a complete, meaningful sentence, never a short repeated fragment. Write the summary, themes, and action points in English.`;
 
 const ENRICH_SYSTEM = `You analyze a sermon transcript for a personal knowledge base.
 Extract what was actually preached; never invent content that is not in the transcript.
@@ -76,10 +79,11 @@ Use empty arrays when a field has nothing. Leave bible_references empty unless t
 const CONDENSE_SYSTEM = `You condense one part of a long transcript.
 Write dense prose notes (no JSON) that preserve: main topics, any references or
 citations, concrete takeaways/action points, and short verbatim key quotes.
-If the audio is live-interpreted (each statement repeated in two languages, in
-EITHER order), keep each point ONCE and quote from the version spoken FIRST — that
-is the original speaker, whichever language it is; the second is the interpreter.
-Do not duplicate the translation.`;
+If you see a sentence immediately repeated as its near-translation in another
+language (live interpretation), collapse that PAIR to one point and quote the
+FIRST sentence of the pair (the original speaker; the second is the interpreter).
+Only matched pairs — do not treat an intro or any unpaired sentence as a
+translation, and do not duplicate translations.`;
 
 /**
  * Enrichment presets by job.style. The transcription pipeline is content-agnostic;
