@@ -23,6 +23,35 @@ export class FakeSermonRepo implements SermonRepo {
       status: 'queued',
       originalFilename,
       audioPath,
+      sourceUrl: null,
+      style: 'sermon',
+      error: null,
+      transcript: null,
+      speaker: meta.speaker ?? null,
+      sermonDate: meta.date ?? null,
+      title: meta.title ?? null,
+      articleItemId: null,
+      articlePath: null,
+      enrichError: null,
+      created: new Date(),
+      updated: new Date(),
+    };
+    this.rows.push(row);
+    return row;
+  }
+
+  async createUrlJob(
+    sourceUrl: string,
+    style: string,
+    meta: SermonMeta = {},
+  ): Promise<SermonJob> {
+    const row: SermonJob = {
+      id: `job-${++this.seq}`,
+      status: 'queued',
+      originalFilename: meta.title ?? sourceUrl,
+      audioPath: null,
+      sourceUrl,
+      style,
       error: null,
       transcript: null,
       speaker: meta.speaker ?? null,

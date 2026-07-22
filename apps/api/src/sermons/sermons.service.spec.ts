@@ -36,13 +36,13 @@ describe('SermonsService.upload', () => {
     expect(job.transcript).toBeNull();
     expect(job.error).toBeNull();
 
-    const saved = await fs.readFile(path.join(uploads, job.audioPath));
+    const saved = await fs.readFile(path.join(uploads, job.audioPath!));
     expect(saved.toString()).toBe('fake-audio-bytes');
   });
 
   it.each(['.mp3', '.m4a', '.wav'])('accepts %s', async (ext) => {
     const job = await service.upload(audio(`talk${ext}`));
-    expect(job.audioPath.endsWith(ext)).toBe(true);
+    expect(job.audioPath?.endsWith(ext)).toBe(true);
   });
 
   it('accepts uppercase extensions', async () => {
@@ -132,5 +132,32 @@ describe('SermonsService job lifecycle views', () => {
 
   it('404s on unknown id', async () => {
     await expect(service.get('nope')).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('SermonsService.transcribeUrl', () => {
+  it('enqueues a URL job: no audio yet, source_url set, default style general', async () => {
+    const job = await service.transcribeUrl({ url: 'https://youtube.com/watch?v=abc' });
+    expect(job.status).toBe('queued');
+    expect(job.audioPath).toBeNull();
+    expect(job.sourceUrl).toBe('https://youtube.com/watch?v=abc');
+    expect(job.style).toBe('general');
+  });
+
+  it('respects an explicit sermon style', async () => {
+    const job = await service.transcribeUrl({ url: 'https://youtu.be/x', style: 'sermon' });
+    expect(job.style).toBe('sermon');
+  });
+
+  it('rejects a non-url', async () => {
+    await expect(service.transcribeUrl({ url: 'not a url' })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  it('rejects an unknown style', async () => {
+    await expect(
+      service.transcribeUrl({ url: 'https://x.com/v', style: 'haiku' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

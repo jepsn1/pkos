@@ -7,6 +7,7 @@ import {
   SERMON_REPO,
   TRANSCRIPT_SEARCH,
 } from './sermons.repo';
+import { MediaController } from './media.controller';
 import { SermonsController } from './sermons.controller';
 import { SermonsService, UPLOADS_PATH } from './sermons.service';
 
@@ -16,7 +17,7 @@ const uploadsPath =
   process.env.UPLOADS_PATH ?? path.resolve(__dirname, '../../../../.uploads');
 
 @Module({
-  controllers: [SermonsController],
+  controllers: [SermonsController, MediaController],
   providers: [
     SermonsService,
     { provide: UPLOADS_PATH, useValue: uploadsPath },

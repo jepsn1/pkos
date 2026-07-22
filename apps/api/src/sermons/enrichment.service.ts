@@ -19,9 +19,6 @@ import { SERMON_REPO, type SermonJob, type SermonRepo } from './sermons.repo';
 
 export const ENRICH_POLL_MS = 'ENRICH_POLL_MS';
 
-/** Vault folder for generated sermon articles (PRD "Sermon Audio Transcription"). */
-const SERMONS_FOLDER = 'faith/sermons';
-
 /** What the enrichment LLM must produce for one transcript. */
 export interface Enrichment {
   title: string;
@@ -54,9 +51,47 @@ Respond with ONLY a JSON object, no other text:
 }
 Use empty arrays when a field has nothing (e.g. no Bible references in a secular speech).`;
 
-const CONDENSE_SYSTEM = `You condense one part of a long sermon transcript.
-Write dense prose notes (no JSON) that preserve: themes, Bible references,
-action points the preacher called for, and short verbatim key quotes.`;
+const ENRICH_SYSTEM_GENERAL = `You analyze a video/talk transcript for a personal knowledge base.
+Extract what was actually said; never invent content that is not in the transcript.
+
+Respond with ONLY a JSON object, no other text:
+{
+  "title": "short descriptive title",
+  "summary": "2-4 sentence summary of the talk",
+  "themes": ["main topic", "..."],
+  "bible_references": [],
+  "action_points": ["concrete takeaway or thing to do", "..."],
+  "key_quotes": ["short memorable quote taken verbatim from the transcript", "..."],
+  "tags": ["lowercase", "topic", "tags"]
+}
+Use empty arrays when a field has nothing. Leave bible_references empty unless the speaker actually cites scripture.`;
+
+const CONDENSE_SYSTEM = `You condense one part of a long transcript.
+Write dense prose notes (no JSON) that preserve: main topics, any references or
+citations, concrete takeaways/action points, and short verbatim key quotes.`;
+
+/**
+ * Enrichment presets by job.style. The transcription pipeline is content-agnostic;
+ * only this step (prompt + target folder + filename) is style-specific.
+ */
+interface StylePreset {
+  system: string;
+  folder: string;
+  filename: (date: string, title: string, speaker: string) => string;
+}
+const STYLE_PRESETS: Record<string, StylePreset> = {
+  sermon: {
+    system: ENRICH_SYSTEM,
+    folder: 'faith/sermons',
+    filename: (date, title, speaker) => `${date} ${title} - ${speaker}`,
+  },
+  general: {
+    system: ENRICH_SYSTEM_GENERAL,
+    folder: 'articles',
+    filename: (date, title) => `${date} ${title}`,
+  },
+};
+const presetFor = (style: string): StylePreset => STYLE_PRESETS[style] ?? STYLE_PRESETS.sermon;
 
 // Single LLM input budget (chars ≈ tokens*4). Longer transcripts get a per-piece
 // condense pass first; the enrichment prompt then runs over the joined notes.
@@ -139,7 +174,8 @@ export class EnrichmentService implements OnApplicationBootstrap, OnModuleDestro
   private async enrichClaimed(job: SermonJob): Promise<EnrichResult> {
     try {
       if (!job.transcript?.trim()) throw new Error('job has no transcript');
-      const enrichment = await this.generate(job.transcript);
+      const preset = presetFor(job.style);
+      const enrichment = await this.generate(job.transcript, preset.system);
 
       const title = job.title?.trim() || enrichment.title;
       const date = job.sermonDate ?? new Date().toISOString().slice(0, 10);
@@ -155,8 +191,8 @@ export class EnrichmentService implements OnApplicationBootstrap, OnModuleDestro
         source: `sermon:${job.id}`,
         tags,
         summary: enrichment.summary,
-        folder: SERMONS_FOLDER,
-        filename: `${date} ${title} - ${speaker}`,
+        folder: preset.folder,
+        filename: preset.filename(date, title, speaker),
         created: date,
       });
       await this.repo.completeEnrichment(job.id, item.id, item.path);
@@ -168,7 +204,7 @@ export class EnrichmentService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /** Full transcript when it fits; condense pieces first when it does not. */
-  private async generate(transcript: string): Promise<Enrichment> {
+  private async generate(transcript: string, system: string): Promise<Enrichment> {
     const input =
       transcript.length <= this.inputMaxChars
         ? transcript
@@ -176,8 +212,8 @@ export class EnrichmentService implements OnApplicationBootstrap, OnModuleDestro
     const raw = stripThink(
       toReply(
         await this.llm.chat([
-          { role: 'system', content: ENRICH_SYSTEM },
-          { role: 'user', content: `Sermon transcript:\n\n${input}` },
+          { role: 'system', content: system },
+          { role: 'user', content: `Transcript:\n\n${input}` },
         ]),
       ).content,
     );

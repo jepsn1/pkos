@@ -353,3 +353,21 @@ describe('helpers', () => {
     expect(body).toContain('job-1');
   });
 });
+
+describe('EnrichmentService style routing', () => {
+  it('style "general" writes to articles/, not faith/sermons', async () => {
+    const job = await repo.createUrlJob('https://youtu.be/x', 'general', {
+      date: '2026-07-12',
+    });
+    job.status = 'done';
+    job.transcript = 'A general talk about building software and shipping fast.';
+    llm.queue.push(ENRICH_JSON);
+
+    expect(await service.pollOnce()).toBe(1);
+
+    const done = (await repo.getById(job.id))!;
+    expect(done.status).toBe('enriched');
+    expect(done.articlePath!.startsWith('articles/')).toBe(true);
+    expect(done.articlePath).not.toContain('faith/sermons');
+  });
+});

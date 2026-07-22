@@ -19,6 +19,17 @@ export const UPLOADS_PATH = 'UPLOADS_PATH';
 
 const ALLOWED_EXTENSIONS = new Set(['.mp3', '.m4a', '.wav']);
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+/** Enrichment styles a URL job may request; default 'general' for arbitrary videos. */
+const STYLES = new Set(['sermon', 'general']);
+
+function normalizeStyle(value: unknown): string {
+  if (value == null || value === '') return 'general';
+  const s = String(value).trim().toLowerCase();
+  if (!STYLES.has(s)) {
+    throw new BadRequestException(`style must be one of: ${[...STYLES].join(', ')}`);
+  }
+  return s;
+}
 
 export interface UploadedAudio {
   originalname: string;
@@ -51,6 +62,22 @@ export class SermonsService {
     await fs.mkdir(this.uploadsPath, { recursive: true });
     await fs.writeFile(path.join(this.uploadsPath, audioPath), file.buffer);
     return this.repo.create(file.originalname, audioPath, cleanMeta(meta));
+  }
+
+  /** Enqueue a URL job: yt-dlp (worker) downloads audio, then transcribe+enrich. */
+  async transcribeUrl(input: {
+    url?: unknown;
+    style?: unknown;
+    speaker?: string;
+    date?: string;
+    title?: string;
+  }): Promise<SermonJob> {
+    const url = typeof input.url === 'string' ? input.url.trim() : '';
+    if (!/^https?:\/\/\S+$/i.test(url)) {
+      throw new BadRequestException('a valid http(s) url is required');
+    }
+    const style = normalizeStyle(input.style);
+    return this.repo.createUrlJob(url, style, cleanMeta(input));
   }
 
   async list(): Promise<SermonJobSummary[]> {

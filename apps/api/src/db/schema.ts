@@ -145,10 +145,14 @@ export const sermonJobs = pgTable('sermon_jobs', {
   })
     .notNull()
     .default('queued'),
-  /** Filename as uploaded, e.g. "2026-07-12 John Piper.mp3". */
+  /** Filename as uploaded, e.g. "2026-07-12 John Piper.mp3" (or a URL job's title). */
   originalFilename: text('original_filename').notNull(),
-  /** Path relative to UPLOADS_PATH (host/container mounts differ). */
-  audioPath: text('audio_path').notNull(),
+  /** Path relative to UPLOADS_PATH; NULL for a URL job until the worker downloads. */
+  audioPath: text('audio_path'),
+  /** Source URL for a URL job (yt-dlp downloads it); NULL for an uploaded file. */
+  sourceUrl: text('source_url'),
+  /** Enrichment style: 'sermon' (→faith/sermons) | 'general' (→articles). */
+  style: text('style').notNull().default('sermon'),
   /** Set when status = error. */
   error: text('error'),
   /** Full transcript, set when status = done. */

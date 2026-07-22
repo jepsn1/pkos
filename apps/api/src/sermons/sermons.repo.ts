@@ -18,8 +18,12 @@ export interface SermonJob {
   id: string;
   status: SermonJobStatus;
   originalFilename: string;
-  /** Relative to UPLOADS_PATH. */
-  audioPath: string;
+  /** Relative to UPLOADS_PATH; null for a URL job until the worker downloads. */
+  audioPath: string | null;
+  /** Source URL for a URL job; null for an uploaded file. */
+  sourceUrl: string | null;
+  /** Enrichment style: 'sermon' | 'general'. */
+  style: string;
   error: string | null;
   transcript: string | null;
   /** Upload metadata (optional). */
@@ -53,6 +57,8 @@ export interface SermonRepo {
     audioPath: string,
     meta?: SermonMeta,
   ): Promise<SermonJob>;
+  /** Enqueue a job whose audio comes from a URL (worker downloads it). */
+  createUrlJob(sourceUrl: string, style: string, meta?: SermonMeta): Promise<SermonJob>;
   list(): Promise<SermonJobSummary[]>;
   getById(id: string): Promise<SermonJob | null>;
   /** Atomically take one `done` job without an article → `enriching`; null when none. */
@@ -89,6 +95,8 @@ const SUMMARY_COLUMNS = {
   status: sermonJobs.status,
   originalFilename: sermonJobs.originalFilename,
   audioPath: sermonJobs.audioPath,
+  sourceUrl: sermonJobs.sourceUrl,
+  style: sermonJobs.style,
   error: sermonJobs.error,
   speaker: sermonJobs.speaker,
   sermonDate: sermonJobs.sermonDate,
@@ -113,6 +121,27 @@ export class DrizzleSermonRepo implements SermonRepo {
       .values({
         originalFilename,
         audioPath,
+        speaker: meta.speaker ?? null,
+        sermonDate: meta.date ?? null,
+        title: meta.title ?? null,
+      })
+      .returning();
+    return row;
+  }
+
+  async createUrlJob(
+    sourceUrl: string,
+    style: string,
+    meta: SermonMeta = {},
+  ): Promise<SermonJob> {
+    const [row] = await this.db
+      .insert(sermonJobs)
+      .values({
+        // original_filename is NOT NULL; use the given title or the URL itself.
+        originalFilename: meta.title ?? sourceUrl,
+        audioPath: null,
+        sourceUrl,
+        style,
         speaker: meta.speaker ?? null,
         sermonDate: meta.date ?? null,
         title: meta.title ?? null,
