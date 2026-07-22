@@ -52,11 +52,12 @@ services:
       # where auto-detect is reliable (flip-flop only bites very short audio).
       # Pin "en" or "da" here if you ever want to force one.
       WHISPER_LANGUAGE: ""
-      # Multilingual "small": needed for Danish, and actually MORE accurate on
-      # English than the old "base.en" (bigger model wins) — English isn't
-      # worsened by enabling Danish, just a bit more CPU/latency. Bump to "medium"
-      # for best Danish if you can tolerate ~10x slower CPU transcription. (was "base.en")
-      WHISPER_MODEL: "small"
+      # large-v3: the SAME model Marcus runs flawlessly on his NVIDIA PC. "small"
+      # was bad at Danish (poor acoustic modeling + shaky lang auto-detect on short
+      # clips → phonetic gibberish). large-v3 = same accuracy as the CUDA box, just
+      # on CPU here (no CUDA on AMD/ROCm) so slower — fine for the dictation button,
+      # laggy for live call mode. Drop to "medium" if CPU latency bites. (was "small")
+      WHISPER_MODEL: "large-v3"
       # Fixed JWT signing key — the image defaults it to empty and regenerates a
       # random one each start, logging everyone out on every restart. Pin it.
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?set WEBUI_SECRET_KEY in .env}
