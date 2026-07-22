@@ -35,12 +35,6 @@ export class OpenAiCompatController {
   @Post('chat/completions')
   @HttpCode(200) // OpenAI spec returns 200; Nest's POST default is 201, which strict clients (Cumbersome) reject
   async completions(@Body() body: CompletionRequest, @Res() res: Response) {
-    // TEMPORARY (2026-07-22): dump the raw request so we can see how Open WebUI
-    // references an attached file in the payload. Remove once the import tool is
-    // built. Gated by env so it's off unless COMPAT_DEBUG_REQUESTS=true.
-    if (process.env.COMPAT_DEBUG_REQUESTS === 'true') {
-      console.log('[compat-debug] request:', JSON.stringify(body));
-    }
     if (body?.stream !== true) {
       res.json(await this.service.complete(body));
       return;
