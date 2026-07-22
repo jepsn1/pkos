@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { parseNote, serializeNote, slugify, type Note } from './note';
+import { parseNote, serializeNote, type Note } from './note';
 
 const execFileAsync = promisify(execFile);
 
@@ -63,7 +63,11 @@ export class VaultService {
     const dir = path.join(this.root, folder);
     await fs.mkdir(dir, { recursive: true });
 
-    const base = (fileName && sanitizeFileName(fileName)) || slugify(note.meta.title);
+    // Human-readable filenames (spaces, not kebab-case) so notes look nice in the
+    // file explorer / Obsidian. sanitizeFileName strips only filesystem-illegal
+    // chars; an explicit-but-empty filename falls back to the title, then "note".
+    const base =
+      sanitizeFileName(fileName ?? '') || sanitizeFileName(note.meta.title) || 'note';
     let relPath = path.posix.join(folder, `${base}.md`);
     for (let n = 2; await this.exists(relPath); n++) {
       relPath = path.posix.join(folder, `${base}-${n}.md`);

@@ -41,7 +41,7 @@ afterEach(async () => {
 describe('VaultService', () => {
   it('writes a note with full YAML frontmatter and commits it', async () => {
     const relPath = await vault().writeNote('faith/reflections', note);
-    expect(relPath).toBe('faith/reflections/on-grace.md');
+    expect(relPath).toBe('faith/reflections/On Grace.md');
 
     const raw = await fs.readFile(path.join(root, relPath), 'utf8');
     const { data, content } = matter(raw);
@@ -78,22 +78,22 @@ describe('VaultService', () => {
     expect(
       await v.writeNote('faith/sermons', note, '2026-07-12 On Grace - John Piper'),
     ).toBe('faith/sermons/2026-07-12 On Grace - John Piper-2.md');
-    // path/shell-hostile chars stripped; empty result falls back to the title slug
+    // path/shell-hostile chars stripped; empty result falls back to the title
     expect(await v.writeNote('faith/sermons', note, 'a/b\\c: d?')).toBe(
       'faith/sermons/a b c d.md',
     );
     expect(await v.writeNote('faith/sermons', note, '///')).toBe(
-      'faith/sermons/on-grace.md',
+      'faith/sermons/On Grace.md',
     );
   });
 
   it('suffixes the filename when the slug already exists', async () => {
     const v = vault();
     expect(await v.writeNote('faith/reflections', note)).toBe(
-      'faith/reflections/on-grace.md',
+      'faith/reflections/On Grace.md',
     );
     expect(await v.writeNote('faith/reflections', note)).toBe(
-      'faith/reflections/on-grace-2.md',
+      'faith/reflections/On Grace-2.md',
     );
   });
 

@@ -199,7 +199,7 @@ describe('SaveService.save', () => {
 
     expect(res).toEqual({
       itemId: 'k-1',
-      path: 'conversations/grace-and-mercy-distinguished.md',
+      path: 'conversations/Grace and Mercy Distinguished.md',
       title: 'Grace and Mercy Distinguished',
     });
 
@@ -233,7 +233,7 @@ describe('SaveService.save', () => {
 
     const res = await service.save(id, { folder: 'faith/conversations' });
 
-    expect(res.path).toBe('faith/conversations/grace-and-mercy-distinguished.md');
+    expect(res.path).toBe('faith/conversations/Grace and Mercy Distinguished.md');
   });
 
   it('409s on resave with the existing path; conversation untouched', async () => {
@@ -258,7 +258,7 @@ describe('SaveService.save', () => {
 
     const second = await service.save(id, { force: true });
 
-    expect(second.path).toBe('conversations/grace-and-mercy-distinguished-2.md');
+    expect(second.path).toBe('conversations/Grace and Mercy Distinguished-2.md');
     expect(second.itemId).not.toBe(first.itemId);
     expect((await repo.getConversation(id))?.savedItemId).toBe(second.itemId);
     // both files exist — vault history is append-only

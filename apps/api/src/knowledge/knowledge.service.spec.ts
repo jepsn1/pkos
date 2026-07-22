@@ -115,7 +115,7 @@ describe('KnowledgeService.ingest', () => {
       folder: 'faith/reflections',
     });
 
-    expect(item.path).toBe('faith/reflections/on-grace.md');
+    expect(item.path).toBe('faith/reflections/On Grace.md');
     expect(item.title).toBe('On Grace');
     expect(item.tags).toEqual(['grace']);
 
@@ -131,7 +131,7 @@ describe('KnowledgeService.ingest', () => {
 
   it('defaults folder to articles', async () => {
     const item = await service.ingest({ title: 'Random', markdown: 'x' });
-    expect(item.path).toBe('articles/random.md');
+    expect(item.path).toBe('articles/Random.md');
   });
 });
 
@@ -161,7 +161,7 @@ describe('KnowledgeService.search', () => {
     ]);
     expect(hits[0].score).toBeGreaterThan(hits[1].score);
     expect(hits[0]).toMatchObject({
-      path: 'faith/reflections/on-grace.md',
+      path: 'faith/reflections/On Grace.md',
       title: 'On Grace',
     });
   });
