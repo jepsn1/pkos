@@ -71,19 +71,26 @@ def _parse_meta(stdout: str) -> dict:
 
 
 class YtDlpDownloader:
-    """Download a URL's audio to UPLOADS_PATH as <job_id>.mp3 via yt-dlp+ffmpeg."""
+    """Download a URL's audio to UPLOADS_PATH as <job_id>.mp3 via yt-dlp+ffmpeg.
 
-    def __init__(self, uploads_dir: str):
+    YouTube bot-walls server IPs ("Sign in to confirm you're not a bot"); pass a
+    cookies.txt (YTDLP_COOKIES) exported from a logged-in browser to get past it.
+    """
+
+    def __init__(self, uploads_dir: str, cookies_file: str | None = None):
         self.uploads = uploads_dir
+        self.cookies = cookies_file if cookies_file and os.path.exists(cookies_file) else None
+        if cookies_file and not self.cookies:
+            log.warning("YTDLP_COOKIES set but file missing: %s", cookies_file)
 
     def download(self, url: str, job_id: str) -> DownloadResult:
         out_tmpl = os.path.join(self.uploads, f"{job_id}.%(ext)s")
         # --print-json emits the video's metadata on stdout while extracting audio.
-        proc = subprocess.run(
-            ["yt-dlp", "-x", "--audio-format", "mp3", "--no-playlist",
-             "--print-json", "-o", out_tmpl, url],
-            capture_output=True, text=True,
-        )
+        cmd = ["yt-dlp", "-x", "--audio-format", "mp3", "--no-playlist", "--print-json"]
+        if self.cookies:
+            cmd += ["--cookies", self.cookies]
+        cmd += ["-o", out_tmpl, url]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             tail = (proc.stderr or proc.stdout or "").strip()[-500:]
             raise RuntimeError(f"yt-dlp failed: {tail}")
@@ -123,7 +130,7 @@ def main() -> None:
         os.environ.get("EMBEDDING_MODEL", "nomic-embed-text"),
     )
     resolve_audio = lambda rel: os.path.join(uploads, rel)  # noqa: E731
-    downloader = YtDlpDownloader(uploads)
+    downloader = YtDlpDownloader(uploads, os.environ.get("YTDLP_COOKIES"))
 
     log.info("worker up: polling every %ss, stale-processing=%smin", poll_sec, stale_min)
     while True:
