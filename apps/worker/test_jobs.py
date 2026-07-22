@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from chunking import Segment
-from jobs import Job, is_claimable, process_one
+from jobs import DownloadResult, Job, is_claimable, process_one
 
 NOW = datetime(2026, 7, 13, 12, 0, 0)
 
@@ -32,6 +32,7 @@ class FakeStore:
         self.completed = []
         self.failed = []
         self.audio_paths = []
+        self.metadata = []
 
     def claim(self):
         return self.jobs.pop(0) if self.jobs else None
@@ -45,10 +46,14 @@ class FakeStore:
     def set_audio_path(self, job_id, audio_path):
         self.audio_paths.append((job_id, audio_path))
 
+    def set_metadata(self, job_id, title, uploader, upload_date):
+        self.metadata.append((job_id, title, uploader, upload_date))
+
 
 class FakeDownloader:
-    def __init__(self, result="job.mp3", error=None):
+    def __init__(self, result="job.mp3", meta=None, error=None):
         self.result = result
+        self.meta = meta or {}
         self.error = error
         self.calls = []
 
@@ -56,7 +61,7 @@ class FakeDownloader:
         self.calls.append((url, job_id))
         if self.error:
             raise self.error
-        return self.result
+        return DownloadResult(audio_path=self.result, **self.meta)
 
 
 class FakeTranscriber:
@@ -137,7 +142,10 @@ URL_JOB = Job("job-2", "My Talk", None, source_url="https://youtu.be/x")
 
 def test_url_job_downloads_then_transcribes():
     store = FakeStore([URL_JOB])
-    downloader = FakeDownloader(result="job-2.mp3")
+    downloader = FakeDownloader(
+        result="job-2.mp3",
+        meta={"title": "My Talk", "uploader": "Some Channel", "upload_date": "2026-07-22"},
+    )
     transcriber = FakeTranscriber([Segment(0, 2, "hello world")])
 
     assert process_one(store, transcriber, FakeEmbedder(),
@@ -146,6 +154,8 @@ def test_url_job_downloads_then_transcribes():
     assert downloader.calls == [("https://youtu.be/x", "job-2")]
     assert store.audio_paths == [("job-2", "job-2.mp3")]      # persisted for resume
     assert transcriber.paths == ["/uploads/job-2.mp3"]        # transcribed the download
+    # metadata piped to the job fields the note is built from
+    assert store.metadata == [("job-2", "My Talk", "Some Channel", "2026-07-22")]
     assert store.completed and store.failed == []
 
 

@@ -187,7 +187,7 @@ export class EnrichmentService implements OnApplicationBootstrap, OnModuleDestro
 
       const item = await this.knowledge.ingest({
         title,
-        markdown: buildArticleBody(enrichment, job.id),
+        markdown: buildArticleBody(enrichment, job.id, job.sourceUrl ?? undefined),
         source: `sermon:${job.id}`,
         tags,
         summary: enrichment.summary,
@@ -243,9 +243,10 @@ export class EnrichmentService implements OnApplicationBootstrap, OnModuleDestro
 }
 
 /** Markdown article body per PRD: all generated fields + pointer to the job. */
-export function buildArticleBody(e: Enrichment, jobId: string): string {
+export function buildArticleBody(e: Enrichment, jobId: string, sourceUrl?: string): string {
   const bullets = (items: string[]) => items.map((s) => `- ${s}`).join('\n');
   const sections = [`## Summary\n\n${e.summary}`];
+  if (sourceUrl) sections.push(`## Source\n\n[Original video](${sourceUrl})`);
   if (e.themes.length) sections.push(`## Main Themes\n\n${bullets(e.themes)}`);
   if (e.bibleReferences.length) {
     sections.push(`## Bible References\n\n${bullets(e.bibleReferences)}`);

@@ -22,6 +22,16 @@ class Job:
     source_url: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class DownloadResult:
+    """Audio path (relative to uploads) + best-effort source metadata."""
+    audio_path: str
+    title: Optional[str] = None
+    uploader: Optional[str] = None
+    upload_date: Optional[str] = None  # ISO YYYY-MM-DD
+    duration_sec: Optional[int] = None
+
+
 def is_claimable(
     status: str,
     updated: datetime,
@@ -47,6 +57,8 @@ class JobStore(Protocol):
                  embeddings: list[list[float]]) -> None: ...
     def fail(self, job_id: str, message: str) -> None: ...
     def set_audio_path(self, job_id: str, audio_path: str) -> None: ...
+    def set_metadata(self, job_id: str, title: Optional[str],
+                     uploader: Optional[str], upload_date: Optional[str]) -> None: ...
 
 
 class Transcriber(Protocol):
@@ -55,7 +67,7 @@ class Transcriber(Protocol):
 
 
 class Downloader(Protocol):
-    def download(self, url: str, job_id: str) -> str:  # -> audio path relative to uploads
+    def download(self, url: str, job_id: str) -> "DownloadResult":
         ...
 
 
@@ -87,8 +99,12 @@ def process_one(
             if downloader is None:
                 raise ValueError("url job but no downloader configured")
             log.info("job %s: downloading %s", job.id, job.source_url)
-            audio_rel = downloader.download(job.source_url, job.id)
+            result = downloader.download(job.source_url, job.id)
+            audio_rel = result.audio_path
             store.set_audio_path(job.id, audio_rel)  # persist so a requeue resumes
+            # Best-effort metadata → job fields the enrichment already uses for the
+            # note (title/speaker/date); only fills what the user didn't set.
+            store.set_metadata(job.id, result.title, result.uploader, result.upload_date)
         if not audio_rel:
             raise ValueError("job has neither audio_path nor source_url")
         segments = transcriber.transcribe(resolve_audio(audio_rel))
@@ -138,6 +154,22 @@ class PgJobStore:
             cur.execute(
                 "UPDATE sermon_jobs SET audio_path = %s, updated = now() WHERE id = %s",
                 (audio_path, job_id),
+            )
+        self.conn.commit()
+
+    def set_metadata(self, job_id, title, uploader, upload_date) -> None:
+        # COALESCE: never override metadata the user supplied at enqueue time.
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE sermon_jobs SET
+                    title = COALESCE(title, %s),
+                    speaker = COALESCE(speaker, %s),
+                    sermon_date = COALESCE(sermon_date, %s),
+                    updated = now()
+                WHERE id = %s
+                """,
+                (title, uploader, upload_date, job_id),
             )
         self.conn.commit()
 

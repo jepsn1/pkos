@@ -14,7 +14,7 @@ import urllib.request
 
 import psycopg
 
-from jobs import DEFAULT_STALE_PROCESSING_MIN, PgJobStore, process_one
+from jobs import DEFAULT_STALE_PROCESSING_MIN, DownloadResult, PgJobStore, process_one
 
 log = logging.getLogger("pkos-worker")
 
@@ -48,17 +48,40 @@ class OllamaEmbedder:
         raise RuntimeError(f"ollama embed failed after {EMBED_RETRIES} tries: {last}")
 
 
+def _parse_meta(stdout: str) -> dict:
+    """Best-effort parse of yt-dlp --print-json output into DownloadResult fields."""
+    try:
+        line = next(
+            (l for l in reversed(stdout.splitlines()) if l.strip().startswith("{")), None
+        )
+        if not line:
+            return {}
+        d = json.loads(line)
+        raw = d.get("upload_date")  # YYYYMMDD
+        iso = f"{raw[0:4]}-{raw[4:6]}-{raw[6:8]}" if raw and len(raw) == 8 else None
+        dur = d.get("duration")
+        return {
+            "title": d.get("title"),
+            "uploader": d.get("uploader") or d.get("channel"),
+            "upload_date": iso,
+            "duration_sec": int(dur) if isinstance(dur, (int, float)) else None,
+        }
+    except Exception:  # noqa: BLE001 — metadata is best-effort, never fail the job
+        return {}
+
+
 class YtDlpDownloader:
     """Download a URL's audio to UPLOADS_PATH as <job_id>.mp3 via yt-dlp+ffmpeg."""
 
     def __init__(self, uploads_dir: str):
         self.uploads = uploads_dir
 
-    def download(self, url: str, job_id: str) -> str:
+    def download(self, url: str, job_id: str) -> DownloadResult:
         out_tmpl = os.path.join(self.uploads, f"{job_id}.%(ext)s")
+        # --print-json emits the video's metadata on stdout while extracting audio.
         proc = subprocess.run(
             ["yt-dlp", "-x", "--audio-format", "mp3", "--no-playlist",
-             "-o", out_tmpl, url],
+             "--print-json", "-o", out_tmpl, url],
             capture_output=True, text=True,
         )
         if proc.returncode != 0:
@@ -67,7 +90,7 @@ class YtDlpDownloader:
         rel = f"{job_id}.mp3"
         if not os.path.exists(os.path.join(self.uploads, rel)):
             raise RuntimeError("yt-dlp produced no mp3")
-        return rel
+        return DownloadResult(audio_path=rel, **_parse_meta(proc.stdout))
 
 
 class WhisperTranscriber:

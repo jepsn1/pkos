@@ -369,5 +369,8 @@ describe('EnrichmentService style routing', () => {
     expect(done.status).toBe('enriched');
     expect(done.articlePath!.startsWith('articles/')).toBe(true);
     expect(done.articlePath).not.toContain('faith/sermons');
+    // URL job → note links back to the source video
+    const note = await vault.readNote(done.articlePath!);
+    expect(note?.body).toContain('https://youtu.be/x');
   });
 });
