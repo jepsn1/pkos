@@ -44,25 +44,31 @@ const VISION_TOOLS: LlmTool[] = [
 ];
 
 /** The vision model's job: faithful, structured extraction — NOT a rewrite or a summary. */
-const VISION_SYSTEM = `You are a careful vision transcriber for a personal knowledge vault. You are given one or more photos/scans (a Bible page, a book, handwritten notes, a slide, a whiteboard). Produce ONE blended markdown note in ENGLISH that captures EVERYTHING legible, faithfully.
+const VISION_SYSTEM = `You are a careful vision transcriber for a personal knowledge vault. You are given one or more photos/scans (often a Bible page, a book, or study notes with hand annotations). Produce ONE blended markdown note that captures EVERYTHING on the page, faithfully.
+
+Write the note in the SAME language as the source — do NOT translate. Transcribe printed text verbatim in its original language.
 
 Output format — EXACTLY:
 TITLE: <a short, specific title for this note>
 <blank line>
 <the markdown note body>
 
-In the body, include, using these sections only when they apply:
+Study the page closely for hand markings, not just the print. Include every section below that applies:
 ## Text
-The printed/typed text, transcribed VERBATIM (do not paraphrase, summarise, or fix wording). Preserve verse numbers, references, and structure. If it is scripture, keep the reference (book chapter:verse).
+The printed/typed text, transcribed VERBATIM in its original language (do not paraphrase, summarise, translate, or fix wording). Keep verse numbers and references (book chapter:verse) and structure.
+## Highlighted
+Each passage marked with a highlighter (e.g. yellow) — quote the highlighted words, one bullet each.
+## Underlined
+Each passage underlined or boxed by hand in pen/pencil — quote those words, one bullet each. Underlines are SEPARATE from highlighter; report both when both appear.
 ## Handwritten notes
-Any handwriting, transcribed as faithfully as you can — margin notes, annotations — regardless of orientation (horizontal or vertical/sideways). If a word is illegible write [illegible].
-## Marked / highlighted
-List each passage the user emphasised (underlined, highlighted, circled, boxed, marked in pen) as its own bullet, quoting the marked words and noting how it was marked (e.g. "underlined", "highlighted").
+The reader's own handwritten notes / margin annotations, transcribed as faithfully as you can, in their original language. IMPORTANT: this handwriting is often small and written at an ANGLE or slanted to fit a narrow margin — read it in place, do not ignore it. Mark any unreadable word as [illegible].
+## Arrows / connections
+Each arrow or line the reader drew: say what it goes FROM (usually one of the handwritten notes) and what it points TO (the word or verse it targets) — e.g. "arrow from the note 'X' to verse 13".
 
 Rules:
-- Transcribe what is actually there. NEVER invent text, verses, or notes that are not visible.
-- If the image contains no legible text at all, output TITLE: (empty) and a body of exactly: NO_TEXT
-- Do not add commentary, interpretation, or a summary of your own.`;
+- Transcribe only what is actually visible. NEVER invent text, verses, notes, arrows, highlights, or underlines that are not there.
+- Do not add commentary, interpretation, or a summary of your own.
+- If the image has no legible content at all, output TITLE: (empty) and a body of exactly: NO_TEXT`;
 
 /** Bad tool arguments / no image — reported back to the model as {error}, never thrown. */
 class VisionError extends Error {}
