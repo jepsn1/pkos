@@ -47,17 +47,15 @@ services:
       OPENAI_API_BASE_URL: http://pkos-api:3002/v1
       OPENAI_API_KEY: ${OPENAI_COMPAT_API_KEY:?set OPENAI_COMPAT_API_KEY in .env}
       ENABLE_OLLAMA_API: "false"
-      # STT language auto-detect (no pin) so BOTH English and Danish work — a
-      # multilingual model detects per clip. Reading paper notes = longer clips,
-      # where auto-detect is reliable (flip-flop only bites very short audio).
-      # Pin "en" or "da" here if you ever want to force one.
-      WHISPER_LANGUAGE: ""
-      # large-v3: the SAME model Marcus runs flawlessly on his NVIDIA PC. "small"
-      # was bad at Danish (poor acoustic modeling + shaky lang auto-detect on short
-      # clips → phonetic gibberish). large-v3 = same accuracy as the CUDA box, just
-      # on CPU here (no CUDA on AMD/ROCm) so slower — fine for the dictation button,
-      # laggy for live call mode. Drop to "medium" if CPU latency bites. (was "small")
-      WHISPER_MODEL: "large-v3"
+      # Pinned English. Danish voice was abandoned: call mode chops speech into
+      # short chunks where multilingual auto-detect flip-flops da→en (gibberish);
+      # Marcus will TYPE Danish instead. Pinning en = rock-solid English voice in
+      # BOTH call + dictation mode. (Set "da" to force Danish input again.)
+      WHISPER_LANGUAGE: "en"
+      # English-ONLY model: faster AND more accurate on English than a multilingual
+      # one, and keeps live voice mode snappy (no CUDA on AMD → whisper is CPU).
+      # base.en = fastest, medium.en = most accurate; small.en balances. (was large-v3)
+      WHISPER_MODEL: "small.en"
       # Fixed JWT signing key — the image defaults it to empty and regenerates a
       # random one each start, logging everyone out on every restart. Pin it.
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?set WEBUI_SECRET_KEY in .env}
