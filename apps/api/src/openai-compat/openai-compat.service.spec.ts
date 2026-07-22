@@ -242,7 +242,7 @@ describe('streamCompletion (real token streaming)', () => {
     );
 
     expect(chunks).toHaveLength(3); // role, error delta, stop — never hangs
-    expect(chunks[1].choices[0].delta.content).toContain('[pkos error: ollama down]');
+    expect(chunks[1].choices[0].delta.content).toContain('pkos error:');
     expect(chunks[2].choices[0].finish_reason).toBe('stop');
   });
 });

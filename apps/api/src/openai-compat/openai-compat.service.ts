@@ -118,18 +118,23 @@ export class OpenAiCompatService {
   async complete(body: CompletionRequest): Promise<CompletionResponse> {
     const { message, history } = parseMessages(body);
     const preset = resolveModel(body.model);
-    const augmented = await this.withImportedAttachments(message);
-    const { answer, citations } = await this.chat.answer(
-      augmented,
-      history,
-      undefined,
-      undefined,
-      undefined,
-      preset.think,
-    );
-    // Footer off by default (voice-first, matches the streaming path); opt in via env.
-    const content =
-      process.env.COMPAT_SOURCES_FOOTER === 'true' ? withSources(answer, citations) : answer;
+    let content: string;
+    try {
+      const augmented = await this.withImportedAttachments(message);
+      const { answer, citations } = await this.chat.answer(
+        augmented,
+        history,
+        undefined,
+        undefined,
+        undefined,
+        preset.think,
+      );
+      // Footer off by default (voice-first, matches the streaming path); opt in via env.
+      content =
+        process.env.COMPAT_SOURCES_FOOTER === 'true' ? withSources(answer, citations) : answer;
+    } catch (err) {
+      content = errorReply(err);
+    }
     return {
       id: `chatcmpl-${randomUUID()}`,
       object: 'chat.completion',
@@ -213,10 +218,25 @@ export class OpenAiCompatService {
       }
     } catch (err) {
       closeThink();
-      send(chunk({ content: `\n\n[pkos error: ${err instanceof Error ? err.message : err}]` }));
+      send(chunk({ content: `\n\n${errorReply(err)}` }));
     }
     send(chunk({}, 'stop'));
   }
+}
+
+/**
+ * Turn a thrown error into a user-facing reply AND log it server-side. Errors were
+ * being streamed to the client but never logged — so nothing was debuggable. The
+ * user WANTS to see errors (transparency on a personal system), so we surface a
+ * clean line; set COMPAT_SURFACE_ERRORS=false to hide them and show a generic note.
+ */
+export function errorReply(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  console.error('[pkos] request failed:', err);
+  if (process.env.COMPAT_SURFACE_ERRORS === 'false') {
+    return '⚠️ Something went wrong handling that — check the server logs.';
+  }
+  return `⚠️ **pkos error:** ${msg}`;
 }
 
 /** Markdown "Sources:" footer so citations survive any OpenAI-speaking client. */

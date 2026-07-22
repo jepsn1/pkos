@@ -90,7 +90,7 @@ describe('OpenAiCompatController SSE', () => {
     const { writes, ended } = state();
     expect(ended).toBe(true);
     expect(writes.at(-1)).toBe('data: [DONE]\n\n');
-    expect(writes.join('')).toContain('[pkos error: ollama down]');
+    expect(writes.join('')).toContain('pkos error:');
   });
 
   it('stream:true with a bad request 400s as JSON before any SSE bytes', async () => {
