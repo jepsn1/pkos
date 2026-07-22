@@ -36,6 +36,13 @@ export interface EnrichResult {
   title: string;
 }
 
+/** Shared handling for live-interpreted (two-language) talks — appended to the
+ *  JSON enrichment prompts so a bilingual transcript doesn't produce duplicated
+ *  points and fragmentary quotes. */
+const BILINGUAL = `
+
+BILINGUAL / LIVE-INTERPRETED AUDIO: the transcript may be a talk where each statement is spoken twice in two languages (e.g. the speaker in Danish, then an interpreter in English). When you see a statement and its translation, treat them as ONE point — never output the same idea twice. Take key_quotes VERBATIM in the speaker's ORIGINAL language (the version spoken first, not the interpreter's), and make each quote a complete, meaningful sentence — never a short repeated fragment. Write the summary, themes, and action points in English.`;
+
 const ENRICH_SYSTEM = `You analyze a sermon transcript for a personal knowledge base.
 Extract what was actually preached; never invent content that is not in the transcript.
 
@@ -49,7 +56,7 @@ Respond with ONLY a JSON object, no other text:
   "key_quotes": ["short memorable quote taken verbatim from the transcript", "..."],
   "tags": ["lowercase", "topic", "tags"]
 }
-Use empty arrays when a field has nothing (e.g. no Bible references in a secular speech).`;
+Use empty arrays when a field has nothing (e.g. no Bible references in a secular speech).${BILINGUAL}`;
 
 const ENRICH_SYSTEM_GENERAL = `You analyze a video/talk transcript for a personal knowledge base.
 Extract what was actually said; never invent content that is not in the transcript.
@@ -64,11 +71,14 @@ Respond with ONLY a JSON object, no other text:
   "key_quotes": ["short memorable quote taken verbatim from the transcript", "..."],
   "tags": ["lowercase", "topic", "tags"]
 }
-Use empty arrays when a field has nothing. Leave bible_references empty unless the speaker actually cites scripture.`;
+Use empty arrays when a field has nothing. Leave bible_references empty unless the speaker actually cites scripture.${BILINGUAL}`;
 
 const CONDENSE_SYSTEM = `You condense one part of a long transcript.
 Write dense prose notes (no JSON) that preserve: main topics, any references or
-citations, concrete takeaways/action points, and short verbatim key quotes.`;
+citations, concrete takeaways/action points, and short verbatim key quotes.
+If the audio is live-interpreted (each statement repeated in two languages, e.g.
+Danish then English), keep each point ONCE and preserve quotes in the speaker's
+original language (the version spoken first) — do not duplicate the translation.`;
 
 /**
  * Enrichment presets by job.style. The transcription pipeline is content-agnostic;
