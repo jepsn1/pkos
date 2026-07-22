@@ -41,7 +41,7 @@ export interface EnrichResult {
  *  points and fragmentary quotes. */
 const BILINGUAL = `
 
-BILINGUAL / LIVE-INTERPRETED AUDIO: the transcript may be a talk where each statement is spoken twice in two languages (e.g. the speaker in Danish, then an interpreter in English). When you see a statement and its translation, treat them as ONE point — never output the same idea twice. Take key_quotes VERBATIM in the speaker's ORIGINAL language (the version spoken first, not the interpreter's), and make each quote a complete, meaningful sentence — never a short repeated fragment. Write the summary, themes, and action points in English.`;
+BILINGUAL / LIVE-INTERPRETED AUDIO: this transcript may be a talk where every statement is said twice — once by the speaker and once by an interpreter — in two different languages. The version that appears FIRST is the original speaker; the one immediately after is the interpreter's translation. This is decided by ORDER, not by a fixed language: the original may be Danish-then-English OR English-then-Danish — determine it from the transcript for each statement, never assume which language is primary. Treat a statement and its translation as ONE point (never output both). Take every key_quote VERBATIM from the ORIGINAL (first-spoken) version, as a complete, meaningful sentence — never a short repeated fragment. Write the summary, themes, and action points in English.`;
 
 const ENRICH_SYSTEM = `You analyze a sermon transcript for a personal knowledge base.
 Extract what was actually preached; never invent content that is not in the transcript.
@@ -76,9 +76,10 @@ Use empty arrays when a field has nothing. Leave bible_references empty unless t
 const CONDENSE_SYSTEM = `You condense one part of a long transcript.
 Write dense prose notes (no JSON) that preserve: main topics, any references or
 citations, concrete takeaways/action points, and short verbatim key quotes.
-If the audio is live-interpreted (each statement repeated in two languages, e.g.
-Danish then English), keep each point ONCE and preserve quotes in the speaker's
-original language (the version spoken first) — do not duplicate the translation.`;
+If the audio is live-interpreted (each statement repeated in two languages, in
+EITHER order), keep each point ONCE and quote from the version spoken FIRST — that
+is the original speaker, whichever language it is; the second is the interpreter.
+Do not duplicate the translation.`;
 
 /**
  * Enrichment presets by job.style. The transcription pipeline is content-agnostic;
