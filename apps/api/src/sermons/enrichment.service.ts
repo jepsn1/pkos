@@ -44,7 +44,8 @@ export interface EnrichResult {
  *  points and fragmentary quotes. */
 const BILINGUAL = `
 
-LANGUAGE: Write the ENTIRE note — summary, section notes, action points, AND key_quotes — in ENGLISH. If the audio is live-interpreted (statements repeated in two languages by an interpreter), collapse each repeated statement to ONE point (never output the same idea twice) and use the ENGLISH version for everything — the interpreter's English if present, otherwise translate faithfully. Never leave Danish (or other non-English) text in the note. Every key_quote must be a complete, meaningful English sentence, never a short repeated fragment.`;
+LANGUAGE & LIVE INTERPRETATION: Write the ENTIRE note — summary, section notes, action points, and key_quotes — in clear, natural ENGLISH, with no Danish (or other non-English) left in.
+This talk is likely live-interpreted: the speaker says a sentence, then an interpreter repeats it in the other language. When you recognize such an aligned pair (the same idea said twice), treat it as ONE point — never output it twice. Produce the English yourself by accurately translating what the ORIGINAL speaker said; you translate better than a rushed live interpreter, so do NOT copy the interpreter's wording (it is often poor) — use it only to confirm the meaning. Translate faithfully: never add, embellish, sharpen, or invent beyond what was actually said. Sentences that are not part of a pair: just translate them faithfully. Every key_quote must be a complete, meaningful English sentence, never a short repeated fragment.`;
 
 const ENRICH_SYSTEM = `You are a careful note-taker turning a sermon transcript into DETAILED study notes for a personal knowledge base. Capture what was actually preached — never invent content.
 
