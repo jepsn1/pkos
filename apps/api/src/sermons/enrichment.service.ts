@@ -52,7 +52,7 @@ This talk is likely live-interpreted: the speaker says a sentence, then an inter
 const QUOTES_RULE = `
 key_quotes: pick a few of the most important quotes. Each is an object:
   {"original": "...", "english": "..."}
-- "original" MUST be a SINGLE contiguous sentence copied VERBATIM from the transcript — exactly as it appears, character for character. Do NOT stitch two separate statements together, do NOT paraphrase, do NOT fix or improve the wording. It must be findable verbatim in the transcript.
+- "original" MUST be a SINGLE contiguous sentence copied VERBATIM from the transcript — exactly as it appears, character for character, so it can be found by an exact text search. Do NOT stitch separate statements together. Do NOT use "…" or "..." or omit any words from the middle. Do NOT paraphrase, tidy, correct, pluralize, or improve the wording — copy it exactly even if it looks imperfect or misspelled. If no single clean sentence works, pick a shorter one that IS exact, or leave key_quotes empty.
 - "english" is a faithful translation of exactly that one sentence (if "original" is already English, copy it into "english" too).
 Choose complete, meaningful sentences. If you cannot find a clean verbatim sentence, leave key_quotes empty rather than inventing or combining.`;
 
