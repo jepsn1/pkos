@@ -24,6 +24,9 @@ services:
       # Tailscale-only exposure: bound to this host's tailscale IPv4 (TAILSCALE_IP
       # in .env, from `tailscale ip -4`). NEVER 0.0.0.0 — published ports bypass UFW.
       - "${TAILSCALE_IP:?set TAILSCALE_IP in .env}:3002:3002"
+      # Also localhost so `tailscale serve` can wrap the api in HTTPS (attachment
+      # URLs need a real cert to render in webui/Obsidian without mixed-content).
+      - "127.0.0.1:3002:3002"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3002/api/health"]
       interval: 30s
