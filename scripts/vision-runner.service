@@ -1,0 +1,30 @@
+# pkos vision runner (issue #29) — reads attached images with headless Claude Code.
+# Runs as the user who owns the Claude auth (~/.claude) so `claude` is authorized.
+#
+# Install (as root):
+#   cp /srv/apps/pkos/scripts/vision-runner.service /etc/systemd/system/pkos-vision-runner.service
+#   systemctl daemon-reload
+#   systemctl enable --now pkos-vision-runner
+#   journalctl -u pkos-vision-runner -f      # watch it
+#
+# Adjust User=/HOME=/PATH= below if your username or Claude install path differ.
+[Unit]
+Description=pkos vision runner (image -> note via headless Claude Code)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=marcus
+Environment=HOME=/home/marcus
+# claude lives in ~/.local/bin; keep system paths too
+Environment=PATH=/home/marcus/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PKOS_API=http://127.0.0.1:3002
+Environment=VISION_POLL_SECS=5
+Environment=VISION_WORK_DIR=/srv/data/vision-runner
+ExecStart=/usr/bin/env bash /srv/apps/pkos/scripts/vision-runner.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
