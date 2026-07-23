@@ -23,18 +23,21 @@ log() { echo "[$(date -Is)] $*"; }
 read_prompt() {
   local img="$1" instr="$2"
   cat <<PROMPT
-You are reading a photograph of a page (often a Bible page) that the reader has annotated by hand, to turn it into ONE coherent study note for their personal knowledge vault.
+You are turning a photo of a hand-annotated page (usually a Bible page) into the reader's OWN study note for their vault.
 
-ORIENTATION: the photo may be rotated or upside-down (phone EXIF). FIRST work out the correct reading orientation, then interpret everything — especially the direction of any arrows — in that corrected orientation. Do not describe things as "upside down"; silently read them the right way up.
+ORIENTATION: the photo may be rotated or upside-down (phone EXIF). First work out the correct reading orientation and read everything — especially arrow directions — that way. Never mention orientation or rotation.
 
-Understand the whole page: the printed text, what the reader highlighted or underlined, their handwritten margin notes, and any arrows/lines linking their notes to specific parts of the text.
+Study the page and understand what the reader was drawing out: what they highlighted, underlined, boxed, wrote in the margins, and joined with arrows. These mark the points that matter to them and how those points connect.
 
-Then WRITE ONE COHERENT NOTE (readable markdown prose, NOT a form or a list of labelled sections):
-- Open with the relevant passage quoted VERBATIM in its original language — never translate or paraphrase scripture, keep verse numbers.
-- Then, in flowing prose, convey the reader's own study: what they emphasised (highlighted/underlined), what their handwritten notes say and mean, and the connections they drew with arrows — woven into a coherent train of thought, as if written up from their markings.
-- Write in the SAME language as the page.
+Now WRITE THE NOTE AS IF THE READER WROTE IT — it must read as a study note in its own right, NOT a description of the photo. This is the most important rule:
+- NEVER refer to "the reader", "the image", "the photo", "the page", or to the markings themselves ("highlighted", "underlined", "boxed", "an arrow", "a margin note", "marked in yellow", etc.). Do not describe what was marked or that anything was marked.
+- Instead STATE the actual insight or point each marking was drawing out, directly, as the note's own claims — so that reading the note simply gives you the takeaways those markings pointed to.
 
-FAITHFULNESS: use only what is actually on the page. Never invent text, verses, notes, marks, or connections. If something is genuinely unreadable, say so briefly rather than guessing.
+Structure it EXACTLY in this order, with headings in the SAME language as the page:
+1. FIRST (the main content, at the top): a short heading, then the key points / insights / impact as direct statements in a coherent order.
+2. LAST (for reference): a heading (e.g. the passage reference), then the relevant verses quoted VERBATIM in the original language — EACH VERSE ON ITS OWN LINE (a blockquote with one verse per line), keeping verse numbers. Never translate or paraphrase scripture.
+
+FAITHFULNESS: use only what is on the page; never invent points, verses, or connections. If something is genuinely unreadable, omit it rather than guess. Write in the SAME language as the page.
 
 Output EXACTLY: first line "TITLE: <a short, specific title>", then a blank line, then the note body. If the image has no legible text at all, output "TITLE:" then a body of exactly NO_TEXT.${instr:+
 
