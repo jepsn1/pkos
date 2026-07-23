@@ -73,7 +73,12 @@ process_one() {
 
   # Read it. --allowedTools Read = read-only (cannot edit/run anything); reading a
   # file in cwd is auto-allowed, so no permission prompt and no dangerous flag.
-  if out=$(claude -p "$(read_prompt "$img" "$instr")" --output-format json --allowedTools "Read" </dev/null 2>>"$WORK/runner.err"); then
+  # Wrapped in `timeout` so a hung/very-slow read fails the job instead of blocking
+  # the whole runner forever (big images are slow — a 28MB PNG can take minutes).
+  local rc
+  out=$(timeout "${VISION_CLAUDE_TIMEOUT:-360}" claude -p "$(read_prompt "$img" "$instr")" --output-format json --allowedTools "Read" </dev/null 2>>"$WORK/runner.err")
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
     text=$(printf '%s' "$out" | python3 -c "import sys,json;d=json.load(sys.stdin);print('' if d.get('is_error') else (d.get('result') or ''))" 2>/dev/null)
     if [ -n "$text" ]; then
       post_json "$API/api/vision/jobs/$id/complete" "$(python3 -c "import json,sys;print(json.dumps({'text':sys.stdin.read()}))" <<<"$text")" \
@@ -81,8 +86,10 @@ process_one() {
     else
       post_json "$API/api/vision/jobs/$id/fail" '{"error":"claude returned no result"}'; log "no result for $id"
     fi
+  elif [ "$rc" -eq 124 ]; then
+    post_json "$API/api/vision/jobs/$id/fail" '{"error":"reading timed out — the image may be very large; try a smaller/clearer photo"}'; log "timeout for $id"
   else
-    post_json "$API/api/vision/jobs/$id/fail" '{"error":"claude invocation failed (see runner.err)"}'; log "claude failed for $id"
+    post_json "$API/api/vision/jobs/$id/fail" '{"error":"claude invocation failed (see runner.err)"}'; log "claude failed for $id (rc=$rc)"
   fi
   rm -f "$WORK/$img"
 }
