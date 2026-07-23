@@ -46,6 +46,9 @@ export interface GenOptions {
    *  card if ollama's auto-fit leaves no room for the image compute buffer — pin
    *  this below auto to force more layers onto CPU RAM (slower, but it fits). */
   numGpu?: number;
+  /** Sampling temperature. Lower = steadier (fewer malformed tool-call JSON, more
+   *  faithful grounding); defaults to LLM_TEMPERATURE. */
+  temperature?: number;
 }
 
 export interface LlmProvider {
@@ -96,6 +99,9 @@ const LLM_THINK = parseThink(process.env.LLM_THINK);
  *  future runaway die in ~75s instead of blocking the serial queue for minutes. */
 const LLM_NUM_CTX = Number(process.env.LLM_NUM_CTX ?? 8192);
 const LLM_NUM_PREDICT = Number(process.env.LLM_NUM_PREDICT ?? 4096);
+/** gpt-oss defaults to temp 1.0 on ollama → sloppy JSON tool calls (malformed
+ *  save_note) + looser grounding. 0.4 = steadier tool calls, more faithful answers. */
+const LLM_TEMPERATURE = Number(process.env.LLM_TEMPERATURE ?? 0.4);
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS ?? 120_000);
 
 /** Remove qwen3 <think>…</think> blocks (belt and braces on top of think:false). */
@@ -212,6 +218,7 @@ export class OllamaLlmProvider implements LlmProvider {
         options: {
           num_ctx: gen?.numCtx ?? LLM_NUM_CTX,
           num_predict: gen?.numPredict ?? LLM_NUM_PREDICT,
+          temperature: gen?.temperature ?? LLM_TEMPERATURE,
           ...(gen?.numGpu !== undefined ? { num_gpu: gen.numGpu } : {}),
         },
         ...(tools?.length
@@ -265,7 +272,7 @@ export class OllamaLlmProvider implements LlmProvider {
         messages: messages.map(toOllamaMessage),
         stream: true,
         think: think ?? LLM_THINK,
-        options: { num_ctx: LLM_NUM_CTX, num_predict: LLM_NUM_PREDICT },
+        options: { num_ctx: LLM_NUM_CTX, num_predict: LLM_NUM_PREDICT, temperature: LLM_TEMPERATURE },
         ...(tools?.length
           ? { tools: tools.map((t) => ({ type: 'function', function: t })) }
           : {}),
