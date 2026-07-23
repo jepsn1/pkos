@@ -23,28 +23,22 @@ log() { echo "[$(date -Is)] $*"; }
 read_prompt() {
   local img="$1" instr="$2"
   cat <<PROMPT
-Read the image ./$img. Transcribe EVERYTHING on the page faithfully into markdown, in the SAME language as the source — do NOT translate.
+You are reading a photograph of a page (often a Bible page) that the reader has annotated by hand, to turn it into ONE coherent study note for their personal knowledge vault.
 
-Output EXACTLY:
-TITLE: <a short, specific title>
+ORIENTATION: the photo may be rotated or upside-down (phone EXIF). FIRST work out the correct reading orientation, then interpret everything — especially the direction of any arrows — in that corrected orientation. Do not describe things as "upside down"; silently read them the right way up.
 
-<the body>
+Understand the whole page: the printed text, what the reader highlighted or underlined, their handwritten margin notes, and any arrows/lines linking their notes to specific parts of the text.
 
-In the body include these sections when they apply:
-## Text
-Printed/typed text, VERBATIM in its original language (keep verse numbers and references).
-## Highlighted
-Each passage marked with a highlighter — quote it, one bullet each.
-## Underlined
-Each passage underlined or boxed by hand in pen/pencil (separate from highlighter).
-## Handwritten notes
-The reader's handwritten/margin notes, read faithfully — they are often small and slanted to fit the margin. Mark anything unreadable [illegible].
-## Arrows / connections
-Each arrow/line drawn: what it goes FROM and points TO.
+Then WRITE ONE COHERENT NOTE (readable markdown prose, NOT a form or a list of labelled sections):
+- Open with the relevant passage quoted VERBATIM in its original language — never translate or paraphrase scripture, keep verse numbers.
+- Then, in flowing prose, convey the reader's own study: what they emphasised (highlighted/underlined), what their handwritten notes say and mean, and the connections they drew with arrows — woven into a coherent train of thought, as if written up from their markings.
+- Write in the SAME language as the page.
 
-Rules: transcribe only what is visible; NEVER invent text, verses, marks or notes; no commentary or summary of your own. If the image has no legible text at all, output "TITLE:" then a body of exactly NO_TEXT.${instr:+
+FAITHFULNESS: use only what is actually on the page. Never invent text, verses, notes, marks, or connections. If something is genuinely unreadable, say so briefly rather than guessing.
 
-Context from the user: $instr}
+Output EXACTLY: first line "TITLE: <a short, specific title>", then a blank line, then the note body. If the image has no legible text at all, output "TITLE:" then a body of exactly NO_TEXT.${instr:+
+
+Context from the reader: $instr}
 PROMPT
 }
 
