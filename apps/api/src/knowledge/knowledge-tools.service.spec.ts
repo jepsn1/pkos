@@ -113,7 +113,7 @@ describe('save_note', () => {
   });
 
   it('auto-embeds an image attached this turn at the top of the note (dedup-safe)', async () => {
-    const img = { url: 'http://pkos/api/attachments/x', mime: 'image/jpeg', base64: 'QUJD' };
+    const img = { id: 'x', url: 'http://pkos/api/attachments/x', mime: 'image/jpeg', base64: 'QUJD' };
 
     // model wrote only the dictated text -> we prepend the embed
     await service.execute(

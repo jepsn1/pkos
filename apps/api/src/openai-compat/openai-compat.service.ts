@@ -119,7 +119,7 @@ export class OpenAiCompatService {
           { buffer, originalname: `image${ext}`, mimetype: img.mime },
           undefined,
         );
-        out.push({ url: attachmentUrl(a.id), mime: a.mime, base64: img.base64 });
+        out.push({ id: a.id, url: attachmentUrl(a.id), mime: a.mime, base64: img.base64 });
       } catch (err) {
         console.warn(`[compat] skip inline image: ${(err as Error).message}`);
       }

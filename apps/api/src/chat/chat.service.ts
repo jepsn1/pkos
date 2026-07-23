@@ -33,9 +33,10 @@ import {
   type ThinkLevel,
 } from './llm.provider';
 
-/** An image attached to the current turn — stored (portable `url`) and ready for a
- *  vision model (`base64`, no data: prefix). Threaded into tool execution via ctx. */
+/** An image attached to the current turn — stored (attachment `id` + portable
+ *  `url`), with `base64` for any inline use. Threaded into tool execution via ctx. */
 export interface RequestImage {
+  id: string;
   url: string;
   mime: string;
   base64: string;

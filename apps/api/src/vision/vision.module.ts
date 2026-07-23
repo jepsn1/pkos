@@ -1,20 +1,23 @@
 import { Module } from '@nestjs/common';
-import { LLM_FETCH, LLM_PROVIDER, OllamaLlmProvider } from '../chat/llm.provider';
+import { db } from '../db';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
+import { VisionController } from './vision.controller';
+import { VisionJobsService } from './vision-jobs.service';
 import { VisionToolsService } from './vision-tools.service';
+import { DrizzleVisionRepo, VISION_REPO } from './vision.repo';
 
 /**
- * Vision → notes. Provides its OWN LLM provider (a vision model runs on the same
- * ollama, selected per-call via VISION_MODEL) so this module does not depend on
- * ChatModule — ChatModule imports THIS one to wire the toolset in.
+ * Image → note (issue #28). The chat tool enqueues a vision_job; the api ingests
+ * the note when a host-side Claude runner (#29) posts the reading back via the
+ * controller. KnowledgeModule provides ingest.
  */
 @Module({
   imports: [KnowledgeModule],
+  controllers: [VisionController],
   providers: [
+    VisionJobsService,
     VisionToolsService,
-    { provide: LLM_PROVIDER, useClass: OllamaLlmProvider },
-    // bind: undici's fetch throws "Illegal invocation" when called detached
-    { provide: LLM_FETCH, useValue: globalThis.fetch.bind(globalThis) },
+    { provide: VISION_REPO, useValue: new DrizzleVisionRepo(db) },
   ],
   exports: [VisionToolsService],
 })

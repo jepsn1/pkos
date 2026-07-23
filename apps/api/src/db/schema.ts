@@ -177,6 +177,40 @@ export const sermonJobs = pgTable('sermon_jobs', {
   updated: timestamp('updated', { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * Image→note jobs (issue #28). An attached image is queued here; a host-side
+ * Claude Code runner (#29) claims it, reads the image with `claude -p`, and posts
+ * the reading back, which becomes a vault note. Mirrors sermon_jobs' async shape.
+ */
+export const visionJobs = pgTable('vision_jobs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  status: text('status', {
+    enum: ['pending', 'running', 'done', 'error'],
+  })
+    .notNull()
+    .default('pending'),
+  /** The stored image to read. */
+  attachmentId: uuid('attachment_id')
+    .notNull()
+    .references(() => attachments.id, { onDelete: 'cascade' }),
+  /** Optional user context ("this is from my Galatians study"). */
+  instructions: text('instructions'),
+  /** Target vault folder (null → ingest default). */
+  folder: text('folder'),
+  /** Claude's reading, set when the runner completes the job. */
+  resultText: text('result_text'),
+  /** The saved note (null until ingested). set null on delete like sermon articles. */
+  itemId: uuid('item_id').references(() => knowledgeItems.id, {
+    onDelete: 'set null',
+  }),
+  /** Saved note path, denormalized for cheap status views. */
+  itemPath: text('item_path'),
+  /** Set when status = error. */
+  error: text('error'),
+  created: timestamp('created', { withTimezone: true }).notNull().defaultNow(),
+  updated: timestamp('updated', { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** ~500-word transcript chunks with timestamps, embedded for semantic search. */
 export const transcriptChunks = pgTable(
   'transcript_chunks',

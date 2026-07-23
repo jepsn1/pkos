@@ -215,7 +215,7 @@ describe('inline images → ChatService', () => {
 
     expect(stored).toEqual([{ originalname: 'image.jpg', mimetype: 'image/jpeg', size: 3 }]);
     expect(calls[0].images).toEqual([
-      { url: attachmentUrl('att-1'), mime: 'image/jpeg', base64: 'QUJD' },
+      { id: 'att-1', url: attachmentUrl('att-1'), mime: 'image/jpeg', base64: 'QUJD' },
     ]);
     // the image rides along as an embeddable reference, and the model is told
     // NOT to invent its contents (vision is dormant)
