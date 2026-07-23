@@ -37,7 +37,9 @@ Structure it EXACTLY in this order, with headings in the SAME language as the pa
 1. FIRST (the main content, at the top): a short heading, then the key points / insights / impact as direct statements in a coherent order.
 2. LAST (for reference): a heading (e.g. the passage reference), then the relevant verses quoted VERBATIM in the original language — EACH VERSE ON ITS OWN LINE (a blockquote with one verse per line), keeping verse numbers. Never translate or paraphrase scripture.
 
-FAITHFULNESS: use only what is on the page; never invent points, verses, or connections. If something is genuinely unreadable, omit it rather than guess. Write in the SAME language as the page.
+FAITHFULNESS: use only what is on the page; never invent points, verses, or connections. If something is genuinely unreadable, omit it rather than guess.
+
+LANGUAGE: the page is in either DANISH or ENGLISH — never any other language. Decide which of those two it is, and write the ENTIRE note in that one language with correct, natural spelling. Never use German, Swedish, or any third language, and never invent or anglicise words / mix languages (e.g. no "gennemhighlightet").
 
 Output EXACTLY: first line "TITLE: <a short, specific title>", then a blank line, then the note body. If the image has no legible text at all, output "TITLE:" then a body of exactly NO_TEXT.${instr:+
 
