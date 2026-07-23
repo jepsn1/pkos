@@ -5,6 +5,7 @@ import { sql } from 'drizzle-orm';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../app.module';
 import { db } from '../db';
+import { EMBEDDING_PROVIDER, type EmbeddingProvider } from '../knowledge/embedding.provider';
 import { GraphService } from '../graph/graph.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 
@@ -46,6 +47,25 @@ async function main() {
   const { restored, skipped } = await app.get(GraphService).restoreFromVault();
   console.log(`rebuild-index: ${restored} relationships restored from frontmatter`);
   for (const s of skipped) console.warn(`rebuild-index: skipped edge ${s}`);
+
+  // Re-embed transcript chunks in place — rebuild() only re-derives knowledge_items
+  // from the vault, but transcript_chunks are derived from audio (not re-derivable
+  // here). They must share the CURRENT embedding model's vector space, so on an
+  // embedding-model swap (nomic → bge-m3) we re-embed each chunk from its stored
+  // text. Picks up rows whose embedding was nulled by the dimension migration.
+  const embedder = app.get<EmbeddingProvider>(EMBEDDING_PROVIDER);
+  const chunks = await db.execute(
+    sql`SELECT id, text FROM transcript_chunks WHERE embedding IS NULL`,
+  );
+  let reembedded = 0;
+  for (const row of chunks.rows as Array<{ id: string; text: string }>) {
+    const vec = await embedder.embed(row.text);
+    await db.execute(
+      sql`UPDATE transcript_chunks SET embedding = ${`[${vec.join(',')}]`}::vector WHERE id = ${row.id}`,
+    );
+    reembedded++;
+  }
+  console.log(`rebuild-index: ${reembedded} transcript chunks re-embedded`);
   await app.close();
 }
 

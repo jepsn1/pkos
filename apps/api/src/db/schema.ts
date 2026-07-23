@@ -15,8 +15,9 @@ import {
   vector,
 } from 'drizzle-orm/pg-core';
 
-/** nomic-embed-text output dimensions. */
-export const EMBEDDING_DIM = 768;
+/** Embedding dimensions. bge-m3 (multilingual, for EN↔DA retrieval) = 1024.
+ *  (Was nomic-embed-text = 768, English-only — couldn't match across languages.) */
+export const EMBEDDING_DIM = 1024;
 
 // DERIVED data only — canonical source is the markdown vault (jepsn1/knowledge).
 // Every row must be rebuildable from vault frontmatter + body (`rebuild-index`).

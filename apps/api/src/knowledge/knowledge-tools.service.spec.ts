@@ -227,7 +227,7 @@ describe('read_note', () => {
         path: 'faith/on-grace.md',
         title: 'On Grace',
         summary: null,
-        score: 0.6,
+        score: 0.5, // below the bge-m3 auto-read cutoff (0.55) → offer candidates, don't guess
       },
     ];
     const res = await run('read_note', { title: 'unmerited favor' });

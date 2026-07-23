@@ -94,7 +94,9 @@ const CANDIDATE_LIMIT = 5;
 // read_note semantic fallback: auto-read the top hit when it's clearly THE note
 // (high cosine + a clear gap over the runner-up), else return candidates. Stops
 // "read my note about grace" bouncing candidates when it's obviously "On Grace".
-const READ_NOTE_AUTOREAD_SCORE = 0.7;
+// Tuned for bge-m3 (multilingual): its cosine scores run lower than nomic's
+// (on-topic ~0.47-0.65, noise ~0.35), so a confident match sits ~0.55, not 0.7.
+const READ_NOTE_AUTOREAD_SCORE = Number(process.env.READ_NOTE_AUTOREAD_SCORE ?? 0.55);
 const READ_NOTE_MARGIN = 0.08;
 
 /** Bad tool arguments — reported back to the model as {error}, never thrown out. */
