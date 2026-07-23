@@ -18,6 +18,7 @@ Routing rules:
 - Only for a short, simple, unambiguous workout mention (~4 exercises or fewer, clean "AxB at Wkg" form) may you call log_workout directly. "AxB" means A separate sets of B reps each ("bench 5x5 at 80kg" = five set entries, each {reps: 5, weight_kg: 80}); weight omitted = bodyweight. Log the ENTIRE session as ONE call.
 - When the user states ANY personal numeric measurement — body weight, height, calories eaten, protein, sleep hours, resting heart rate, mood score, blood pressure, anything with a number — call log_metric. Reuse an existing metric name when one fits; bake the unit into the name (weight_kg, height_cm, sleep_hours, protein_g) or pass it as unit.
 - When the user asks anything about their own body or measurements — "what's my height", "how tall am I", "how much do I weigh", "how did I sleep", "what metrics do you have on me" — the answer IS in the metric log: ALWAYS call query_metric before answering. NEVER say you lack access to their information without having called query_metric first. When the tool result is empty, say plainly that nothing is logged yet and offer to log it if they tell you — NEVER tell the user to "log in".
+  Metric names are matched fuzzily, so a reasonable guess ("body fat" → body_fat_pct) resolves on its own. If a result comes back with a "candidates" list instead of a value, pick the intended name from it and query_metric again with that exact name before answering.
   Pick the query mode by intent: a CURRENT value ("how much do I weigh now") → query=latest with the name. A CHANGE or TREND ("have I lost/gained weight", "am I trending up/down", "how has my weight changed", "since last month") → query=SERIES with the name, then COMPARE the earliest vs latest values yourself and state the direction + amount (do NOT use latest for change questions — a single value can't show a trend). An AVERAGE ("average sleep", "typically") → query=avg. No name → query=latest (every metric).
 - Broad questions about the user ("what do you know about me?", "tell me about myself") → call query_metric {query: latest} (no name) for their actual current values, then answer in prose combining those values with the knowledge items above. State values directly ("you're 180 cm tall"), not record metadata ("a metric was logged on...").
 - When the user asks about training data (exercise progression, weekly volume, recent workouts), call query_fitness.
@@ -275,10 +276,44 @@ export class FitnessToolsService {
     }
   }
 
+  /**
+   * Map a requested metric name to one actually logged: exact match first, else
+   * a fuzzy match (token overlap / substring) so "body fat" finds body_fat_pct
+   * without the model having to know the exact stored name. Returns the resolved
+   * name, several ambiguous candidates, or the normalized original when nothing
+   * is close (so the query still reports "nothing logged").
+   */
+  private async resolveMetricName(
+    raw: string,
+  ): Promise<{ name: string } | { candidates: string[] }> {
+    const requested = normalizeMetricName(raw);
+    const existing = (await this.repo.metricNames()).map((r) => r.name);
+    if (existing.length === 0 || existing.includes(requested)) return { name: requested };
+    const scored = existing
+      .map((name) => ({ name, score: nameSimilarity(requested, name) }))
+      .filter((s) => s.score > 0)
+      .sort((a, b) => b.score - a.score);
+    if (scored.length === 0) return { name: requested };
+    const top = scored[0].score;
+    const best = scored.filter((s) => s.score === top).map((s) => s.name);
+    return best.length === 1 ? { name: best[0] } : { candidates: best };
+  }
+
   /** Latest entry for one name, or the latest entry of EVERY name when omitted. */
   private async latestMetric(args: Args) {
     if (args.name != null && args.name !== '') {
-      const name = normalizeMetricName(requiredString(args.name, 'name'));
+      const raw = requiredString(args.name, 'name');
+      const resolved = await this.resolveMetricName(raw);
+      if ('candidates' in resolved) {
+        return {
+          query: 'latest',
+          name: raw,
+          entry: null,
+          candidates: resolved.candidates,
+          message: `no metric exactly named "${raw}" — closest: ${resolved.candidates.join(', ')}. Re-query with one of these.`,
+        };
+      }
+      const name = resolved.name;
       const row = await this.repo.latestMetric(name);
       return {
         query: 'latest',
@@ -299,7 +334,18 @@ export class FitnessToolsService {
   }
 
   private async metricAvg(args: Args) {
-    const name = normalizeMetricName(requiredString(args.name, 'name'));
+    const raw = requiredString(args.name, 'name');
+    const resolved = await this.resolveMetricName(raw);
+    if ('candidates' in resolved) {
+      return {
+        query: 'avg',
+        name: raw,
+        avg: null,
+        candidates: resolved.candidates,
+        message: `no metric exactly named "${raw}" — closest: ${resolved.candidates.join(', ')}. Re-query with one of these.`,
+      };
+    }
+    const name = resolved.name;
     const until = this.parseDate(args.until, 'until');
     const since = args.since == null ? addDays(until, -6) : this.parseDate(args.since, 'since');
     if (since > until) throw new ToolArgError('since must be <= until');
@@ -312,7 +358,18 @@ export class FitnessToolsService {
   }
 
   private async metricSeries(args: Args) {
-    const name = normalizeMetricName(requiredString(args.name, 'name'));
+    const raw = requiredString(args.name, 'name');
+    const resolved = await this.resolveMetricName(raw);
+    if ('candidates' in resolved) {
+      return {
+        query: 'series',
+        name: raw,
+        entries: [],
+        candidates: resolved.candidates,
+        message: `no metric exactly named "${raw}" — closest: ${resolved.candidates.join(', ')}. Re-query with one of these.`,
+      };
+    }
+    const name = resolved.name;
     const since = args.since == null ? null : this.parseDate(args.since, 'since');
     const until = args.until == null ? null : this.parseDate(args.until, 'until');
     const limit = optionalLimit(args.limit, 50);
@@ -435,6 +492,21 @@ export function normalizeMetricName(raw: string): string {
     .replace(/^_+|_+$/g, '');
   if (!name) throw new ToolArgError('name must contain letters or digits');
   return name;
+}
+
+/**
+ * Fuzzy similarity between two already-normalized metric names, used to recall an
+ * arbitrary metric when the model guesses a near-miss name. Scores shared
+ * underscore-tokens (so "body_fat" ↔ body_fat_pct = 2), with a weaker substring
+ * signal (0.5) so unsegmented guesses like "bodyfat" still match. 0 = unrelated.
+ */
+export function nameSimilarity(a: string, b: string): number {
+  const bTokens = new Set(b.split('_').filter(Boolean));
+  const shared = a.split('_').filter((t) => t && bTokens.has(t)).length;
+  if (shared > 0) return shared;
+  const ac = a.replace(/_/g, '');
+  const bc = b.replace(/_/g, '');
+  return ac && bc && (bc.includes(ac) || ac.includes(bc)) ? 0.5 : 0;
 }
 
 function asObject(v: unknown, field: string): Args {

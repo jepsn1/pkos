@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   addDays,
   FitnessToolsService,
+  nameSimilarity,
   normalizeMetricName,
   weekStart,
 } from './fitness-tools.service';
@@ -318,6 +319,72 @@ describe('query_metric latest', () => {
   it('empty metrics array when nothing logged at all', async () => {
     const res = await run('query_metric', { query: 'latest' });
     expect(res).toEqual({ query: 'latest', metrics: [] });
+  });
+});
+
+describe('query_metric fuzzy name recall', () => {
+  beforeEach(() => {
+    repo.metrics.push(
+      { id: 'm1', name: 'body_fat_pct', date: '2026-07-22', value: 12.5, unit: '%' },
+      { id: 'm2', name: 'muscle_mass_kg', date: '2026-07-22', value: 64.5, unit: 'kg' },
+      { id: 'm3', name: 'weight_kg', date: '2026-07-20', value: 76.8, unit: 'kg' },
+    );
+  });
+
+  it('resolves a near-miss name to the logged metric (latest)', async () => {
+    const res = await run('query_metric', { query: 'latest', name: 'body fat' });
+    expect(res).toEqual({
+      query: 'latest',
+      name: 'body_fat_pct',
+      entry: { value: 12.5, unit: '%', date: '2026-07-22' },
+    });
+  });
+
+  it('resolves "muscle mass" to muscle_mass_kg', async () => {
+    const res = await run('query_metric', { query: 'latest', name: 'muscle mass' });
+    expect(res.name).toBe('muscle_mass_kg');
+    expect(res.entry.value).toBe(64.5);
+  });
+
+  it('resolves an unsegmented guess via substring ("bodyfat")', async () => {
+    const res = await run('query_metric', { query: 'latest', name: 'bodyfat' });
+    expect(res.name).toBe('body_fat_pct');
+  });
+
+  it('returns candidates (not a value) when the guess is ambiguous', async () => {
+    repo.metrics.push({ id: 'm4', name: 'body_fat_kg', date: '2026-07-22', value: 9.6, unit: 'kg' });
+    const res = await run('query_metric', { query: 'latest', name: 'body fat' });
+    expect(res.entry).toBeNull();
+    expect(res.candidates).toEqual(['body_fat_kg', 'body_fat_pct']);
+  });
+
+  it('reports nothing logged (null) when no name is even close', async () => {
+    const res = await run('query_metric', { query: 'latest', name: 'sleep' });
+    expect(res).toEqual({ query: 'latest', name: 'sleep', entry: null });
+  });
+
+  it('fuzzy recall works for avg and series too', async () => {
+    repo.metrics.push({ id: 'm5', name: 'body_fat_pct', date: '2026-07-23', value: 12.1, unit: '%' });
+    const avg = await run('query_metric', {
+      query: 'avg',
+      name: 'body fat',
+      since: '2026-07-01',
+      until: '2026-07-31',
+    });
+    expect(avg.name).toBe('body_fat_pct');
+    expect(avg.avg).toBe(12.3);
+    const series = await run('query_metric', { query: 'series', name: 'body fat' });
+    expect(series.name).toBe('body_fat_pct');
+    expect(series.entries).toHaveLength(2);
+  });
+});
+
+describe('nameSimilarity', () => {
+  it('scores shared tokens, weak substring, and zero for unrelated', () => {
+    expect(nameSimilarity('body_fat', 'body_fat_pct')).toBe(2);
+    expect(nameSimilarity('weight', 'weight_kg')).toBe(1);
+    expect(nameSimilarity('bodyfat', 'body_fat_pct')).toBe(0.5);
+    expect(nameSimilarity('sleep', 'body_fat_pct')).toBe(0);
   });
 });
 

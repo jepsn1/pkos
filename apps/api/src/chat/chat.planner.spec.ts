@@ -131,7 +131,17 @@ class FakeFitnessRepo implements FitnessRepo {
         (until === null || m.date <= until),
     );
   }
-  metricNames = (): Promise<MetricNameRow[]> => rejectUnused();
+  async metricNames(): Promise<MetricNameRow[]> {
+    const byName = new Map<string, MetricRow[]>();
+    for (const m of this.metrics) byName.set(m.name, [...(byName.get(m.name) ?? []), m]);
+    return [...byName.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, rows]) => ({
+        name,
+        count: rows.length,
+        lastDate: rows.map((r) => r.date).sort().at(-1)!,
+      }));
+  }
   listMetrics = rejectUnused;
   setsForExercise = rejectUnused;
   setsSince = rejectUnused;
