@@ -41,7 +41,9 @@ FAITHFULNESS: use only what is on the page; never invent points, verses, or conn
 
 LANGUAGE: the page is in either DANISH or ENGLISH — never any other language. Decide which of those two it is, and write the ENTIRE note in that one language with correct, natural spelling. Never use German, Swedish, or any third language, and never invent or anglicise words / mix languages (e.g. no "gennemhighlightet").
 
-Output EXACTLY: first line "TITLE: <a short, specific title>", then a blank line, then the note body. If the image has no legible text at all, output "TITLE:" then a body of exactly NO_TEXT.${instr:+
+TITLE: work out which book and chapter the page is from (use the verse references, running heads, page text, and any handwritten reference). Then make the title EXACTLY "Book Chapter: Core idea", where Book Chapter is the biblical book name and chapter number (e.g. "Galatians 5") and Core idea is a short, specific phrase naming the central concept the note draws out (e.g. "Galatians 5: Fruit of the Spirit"). Use the same language as the note for the book name and core idea. If the book/chapter is genuinely undeterminable, omit that part and use just the core idea.
+
+Output EXACTLY: first line "TITLE: <the title as specified above>", then a blank line, then the note body. If the image has no legible text at all, output "TITLE:" then a body of exactly NO_TEXT.${instr:+
 
 Context from the reader: $instr}
 PROMPT
