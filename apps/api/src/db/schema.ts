@@ -282,6 +282,30 @@ export const metricEntries = pgTable(
   (t) => [index('metric_entries_name_date_idx').on(t.name, t.date)],
 );
 
+/**
+ * Local cache of Bible verses fetched from an external source (Bibelen 1992 via
+ * bibelselskabet.dk), so get_verse serves verbatim authorized scripture offline
+ * and deterministically after a chapter is fetched once. `translation` allows
+ * more editions later; (translation, book, chapter, verse) is unique. NOT rebuilt
+ * by rebuild-index — it's a derived cache, refillable from the source on demand.
+ */
+export const bibleVerses = pgTable(
+  'bible_verses',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    translation: text('translation').notNull(),
+    book: text('book').notNull(),
+    chapter: integer('chapter').notNull(),
+    verse: integer('verse').notNull(),
+    text: text('text').notNull(),
+    created: timestamp('created', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('bible_verses_ref_uq').on(t.translation, t.book, t.chapter, t.verse),
+    index('bible_verses_lookup_idx').on(t.translation, t.book, t.chapter),
+  ],
+);
+
 export const goals = pgTable('goals', {
   id: uuid('id').defaultRandom().primaryKey(),
   text: text('text').notNull(),

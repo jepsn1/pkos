@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { db } from '../db';
+import { BibleModule } from '../bible/bible.module';
 import { FitnessModule } from '../fitness/fitness.module';
 import { GraphModule } from '../graph/graph.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
@@ -13,7 +14,7 @@ import { LLM_FETCH, LLM_PROVIDER, OllamaLlmProvider } from './llm.provider';
 import { SaveService } from './save.service';
 
 @Module({
-  imports: [KnowledgeModule, GraphModule, FitnessModule, WebSearchModule, SermonsModule, VisionModule],
+  imports: [KnowledgeModule, GraphModule, FitnessModule, BibleModule, WebSearchModule, SermonsModule, VisionModule],
   controllers: [ChatController],
   providers: [
     ChatService,

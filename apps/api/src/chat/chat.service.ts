@@ -13,6 +13,7 @@ import { VaultService } from '../knowledge/vault.service';
 import { MediaToolsService } from '../sermons/media-tools.service';
 import { VisionToolsService } from '../vision/vision-tools.service';
 import { WebSearchToolService } from '../web-search/web-search-tools.service';
+import { BibleToolsService } from '../bible/bible-tools.service';
 import {
   CHAT_REPO,
   type ChatRepo,
@@ -113,6 +114,7 @@ export class ChatService {
     @Optional() private readonly webSearch?: WebSearchToolService,
     @Optional() private readonly mediaTools?: MediaToolsService,
     @Optional() private readonly visionTools?: VisionToolsService,
+    @Optional() private readonly bibleTools?: BibleToolsService,
   ) {}
 
   /** Every tool-exposing service that is wired in (each is optional). */
@@ -120,6 +122,7 @@ export class ChatService {
     const sets: Array<ToolSet | undefined> = [
       this.fitness,
       this.knowledgeTools,
+      this.bibleTools,
       this.webSearch,
       this.mediaTools,
       // Vision is dormant by default: local VLMs that fit the 16GB card (7b) can't
