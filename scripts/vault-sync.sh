@@ -18,6 +18,16 @@ flock -n 9 || { echo "$(date -Is) another sync running, skip"; exit 0; }
 
 export GIT_TERMINAL_PROMPT=0
 
+# Auto-commit anything written outside the API pipeline (manual edits, scripts).
+# The API commits its own note writes; this is the safety net so a stray
+# untracked/modified file still syncs instead of sitting local forever.
+# Committed here (before the rebase) so it replays cleanly on top of remote.
+if [ -n "$(git status --porcelain)" ]; then
+  git add -A
+  git commit -q -m "vault-sync: auto-commit local changes $(date -Is)" \
+    && echo "$(date -Is) auto-committed local changes"
+fi
+
 # Remote tip as we last knew it, then fetch to learn the true tip.
 before_remote=$(git rev-parse origin/main 2>/dev/null || echo none)
 git fetch origin main --quiet || { echo "$(date -Is) fetch failed"; exit 1; }
