@@ -366,6 +366,47 @@ describe('streamCompletion (real token streaming)', () => {
     ]);
   });
 
+  it('streams tool status as reasoning_content by default, silenced by COMPAT_STREAM_STATUS=false', async () => {
+    // fake answer that fires onStatus (8th arg) before streaming the answer token
+    const makeChat = () =>
+      ({
+        answer: async (
+          _m: string,
+          _h: unknown,
+          onToken?: (t: string) => void,
+          _ot?: unknown,
+          _model?: unknown,
+          _think?: unknown,
+          _images?: unknown,
+          onStatus?: (l: string) => void,
+        ) => {
+          onStatus?.('Looking up Salme 23:1');
+          onToken?.('Peace.');
+          return { answer: 'Peace.', citations: [] };
+        },
+      }) as unknown as ChatService;
+
+    const chunks: CompletionChunk[] = [];
+    await new OpenAiCompatService(makeChat()).streamCompletion(
+      { messages: [{ role: 'user', content: 'psalm 23?' }] },
+      (c) => chunks.push(c),
+    );
+    const reasoning = chunks.map((c) => c.choices[0].delta.reasoning_content).filter(Boolean);
+    expect(reasoning).toEqual(['Looking up Salme 23:1…\n']);
+
+    process.env.COMPAT_STREAM_STATUS = 'false';
+    try {
+      const silent: CompletionChunk[] = [];
+      await new OpenAiCompatService(makeChat()).streamCompletion(
+        { messages: [{ role: 'user', content: 'psalm 23?' }] },
+        (c) => silent.push(c),
+      );
+      expect(silent.some((c) => c.choices[0].delta.reasoning_content)).toBe(false);
+    } finally {
+      delete process.env.COMPAT_STREAM_STATUS;
+    }
+  });
+
   it('turns a mid-stream failure into an error delta followed by the stop chunk', async () => {
     const chat = {
       answer: async () => {

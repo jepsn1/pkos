@@ -21,7 +21,7 @@ import type {
   Message,
   NewMessage,
 } from './chat.repo';
-import { ChatService } from './chat.service';
+import { ChatService, statusLabel } from './chat.service';
 import type { LlmMessage, LlmProvider, LlmReply, LlmTool } from './llm.provider';
 
 /** Records messages AND tools per call; replies from a scripted queue. */
@@ -456,5 +456,18 @@ describe('ChatService planner (knowledge tools)', () => {
     expect(fitnessRepo.metrics.map((m) => m.name)).toEqual(['weight_kg']);
     expect(knowledgeService.ingested).toHaveLength(0);
     expect(res.answer).toBe('Logged 82 kg.');
+  });
+});
+
+describe('statusLabel', () => {
+  it('gives friendly, argument-aware labels per tool', () => {
+    expect(statusLabel({ name: 'get_verse', arguments: { reference: 'Sl 23:1' } })).toBe(
+      'Looking up Sl 23:1',
+    );
+    expect(statusLabel({ name: 'web_search', arguments: { query: 'nicaea' } })).toBe(
+      'Searching the web for “nicaea”',
+    );
+    expect(statusLabel({ name: 'query_metric', arguments: {} })).toBe('Checking your metrics');
+    expect(statusLabel({ name: 'mystery_tool', arguments: {} })).toBe('Running mystery_tool');
   });
 });

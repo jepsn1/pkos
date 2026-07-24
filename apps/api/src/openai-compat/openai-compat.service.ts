@@ -78,7 +78,10 @@ export interface CompletionChunk {
   model: string;
   choices: Array<{
     index: 0;
-    delta: { role?: 'assistant'; content?: string };
+    // reasoning_content: the OpenAI "reasoning" channel; Open WebUI renders it as a
+    // live, collapsible status/thinking section, separate from the answer and kept
+    // out of TTS. We use it to surface tool activity ("Looking up scripture…").
+    delta: { role?: 'assistant'; content?: string; reasoning_content?: string };
     finish_reason: 'stop' | null;
   }>;
 }
@@ -228,6 +231,9 @@ export class OpenAiCompatService {
     // wasting seconds per turn. Reasoning still runs server-side (routing quality
     // kept) — it's just not forwarded. Re-enable for a text-only client via env.
     const streamThinking = process.env.COMPAT_STREAM_THINKING === 'true';
+    // Tool activity is surfaced as reasoning_content ("Searching the web…"); on by
+    // default (set COMPAT_STREAM_STATUS=false to silence, e.g. if voice reads it).
+    const streamStatus = process.env.COMPAT_STREAM_STATUS !== 'false';
     const emitFooter = process.env.COMPAT_SOURCES_FOOTER === 'true';
     let thinkOpen = false;
     const closeThink = () => {
@@ -258,6 +264,7 @@ export class OpenAiCompatService {
         undefined,
         preset.think,
         images,
+        streamStatus ? (label) => send(chunk({ reasoning_content: `${label}…\n` })) : undefined,
       );
       closeThink();
       if (emitFooter) {

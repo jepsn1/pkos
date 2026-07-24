@@ -6,7 +6,8 @@ import { formatReference, parseReference } from './reference';
 export const BIBLE_ROUTING = `You have a get_verse tool for exact Bible text (authorized Danish 1992 translation). CRITICAL:
 - You do NOT reliably know the wording of Bible verses — your memory of scripture is frequently wrong, even when you feel certain. Therefore ANY time you are about to quote, cite, reproduce, or write out a Bible verse — whether in a saved note or a chat answer — you MUST FIRST call get_verse with the reference (e.g. "Matt 7:21-23", "Romerne 10:9-13", "Sl 23") and then use ONLY the text it returns, verbatim, in its returned Danish wording, together with the reference.
 - Writing a verse from memory is ALWAYS an error, no matter how sure you feel. Do not produce any quoted scripture that did not come from a get_verse result in this same turn.
-- If get_verse returns an error or no text, do NOT write the quote at all — state that the exact wording could not be verified and give only the reference.`;
+- If get_verse returns an error or no text, do NOT write the quote at all — state that the exact wording could not be verified and give only the reference.
+- When you quote scripture in a chat reply, say where it is from: name the reference and the translation get_verse returned (e.g. "Salme 23:1 (Bibelen 1992)"), so it is clear the wording is the authorized text and not from memory.`;
 
 const BIBLE_TOOLS: LlmTool[] = [
   {

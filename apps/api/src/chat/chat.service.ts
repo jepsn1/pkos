@@ -100,6 +100,45 @@ export function retrievalQuery(message: string, history: LlmMessage[]): string {
   return [...recent, message].join('\n');
 }
 
+/** Human-friendly "what am I doing" label for a tool call, shown as live status. */
+export function statusLabel(call: LlmToolCall): string {
+  const a = (call.arguments ?? {}) as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : '');
+  switch (call.name) {
+    case 'get_verse':
+      return `Looking up ${str(a.reference) || 'scripture'}`;
+    case 'web_search':
+      return str(a.query) ? `Searching the web for “${str(a.query)}”` : 'Searching the web';
+    case 'save_note':
+      return `Saving note${str(a.title) ? ` “${str(a.title)}”` : ''}`;
+    case 'read_note':
+      return 'Reading your notes';
+    case 'list_notes':
+      return 'Browsing your notes';
+    case 'move_note':
+      return 'Moving note';
+    case 'log_metric':
+      return 'Logging measurement';
+    case 'query_metric':
+      return 'Checking your metrics';
+    case 'log_workout':
+    case 'log_workout_text':
+      return 'Logging workout';
+    case 'query_fitness':
+      return 'Checking your training log';
+    case 'transcribe_video':
+      return 'Queuing transcription';
+    case 'transcription_status':
+      return 'Checking transcription status';
+    case 'make_note_from_image':
+      return 'Reading the image';
+    case 'vision_status':
+      return 'Checking image note status';
+    default:
+      return `Running ${call.name}`;
+  }
+}
+
 @Injectable()
 export class ChatService {
   constructor(
@@ -187,6 +226,7 @@ export class ChatService {
     model?: string,
     think?: ThinkLevel,
     images: RequestImage[] = [],
+    onStatus?: (label: string) => void,
   ): Promise<{ answer: string; citations: Citation[] }> {
     // Retrieve on the recent conversation, not just this message: a vague
     // follow-up ("what else does it say?") embeds to nothing on its own, so the
@@ -257,6 +297,7 @@ export class ChatService {
         // Dispatch by tool name; unknown names land on the first set → {error}.
         const owner =
           toolsets.find((s) => s.tools.some((t) => t.name === call.name)) ?? toolsets[0];
+        if (onStatus) onStatus(statusLabel(call));
         const result = await owner.execute(call, ctx);
         // Observability: tool routing is the main failure mode of small local
         // models — log every call verbatim so "it said no data" is debuggable.
