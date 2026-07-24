@@ -1,8 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import type { RequestImage, ToolContext } from '../chat/chat.service';
 import type { LlmTool, LlmToolCall } from '../chat/llm.provider';
 import { KnowledgeService } from './knowledge.service';
 import type { KnowledgeItem } from './knowledge.repo';
+import { BibleService } from '../bible/bible.service';
+import { verifyScripture } from '../bible/scripture-verifier';
 
 /** Appended to the chat system prompt so the planner routes knowledge turns here. */
 export const KNOWLEDGE_ROUTING = `You also have tools over the user's knowledge vault:
@@ -110,7 +112,10 @@ type Args = Record<string, unknown>;
 export class KnowledgeToolsService {
   readonly tools = KNOWLEDGE_TOOLS;
 
-  constructor(private readonly knowledge: KnowledgeService) {}
+  constructor(
+    private readonly knowledge: KnowledgeService,
+    @Optional() private readonly bible?: BibleService,
+  ) {}
 
   routingPrompt(): string {
     return KNOWLEDGE_ROUTING;
@@ -140,7 +145,13 @@ export class KnowledgeToolsService {
 
   private async saveNote(args: Args, images: RequestImage[] = []) {
     const title = requiredString(args.title, 'title');
-    const markdown = withImageEmbeds(requiredString(args.markdown, 'markdown'), images);
+    let markdown = withImageEmbeds(requiredString(args.markdown, 'markdown'), images);
+    // Deterministic scripture safety net: rewrite any reference-anchored blockquote
+    // to verbatim source text, so a note is correct even if the model quoted a
+    // verse from memory instead of calling get_verse.
+    if (this.bible) {
+      ({ markdown } = await verifyScripture(markdown, (ref) => this.bible!.getVerses(ref)));
+    }
     const folder = optionalFolder(args.folder);
     const tags = optionalTags(args.tags);
     const summary = optionalString(args.summary, 'summary');

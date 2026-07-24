@@ -11,12 +11,14 @@ import { DrizzleKnowledgeRepo, KNOWLEDGE_REPO } from './knowledge.repo';
 import { KnowledgeService } from './knowledge.service';
 import { GIT, realGitRunner, VAULT_PATH, VaultService } from './vault.service';
 import { SermonsModule } from '../sermons/sermons.module';
+import { BibleModule } from '../bible/bible.module';
 
 const vaultPath = process.env.VAULT_PATH ?? '/srv/data/knowledge';
 
 @Module({
   // TRANSCRIPT_SEARCH: /api/search unions knowledge items + sermon chunks
-  imports: [SermonsModule],
+  // BibleModule: save_note verifies scripture blockquotes against get_verse
+  imports: [SermonsModule, BibleModule],
   controllers: [KnowledgeController],
   providers: [
     KnowledgeService,
