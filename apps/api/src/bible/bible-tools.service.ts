@@ -3,8 +3,10 @@ import type { LlmTool, LlmToolCall } from '../chat/llm.provider';
 import { BibleService } from './bible.service';
 import { formatReference, parseReference } from './reference';
 
-export const BIBLE_ROUTING = `You also have a get_verse tool for exact Bible text (authorized Danish translation):
-- get_verse (SCRIPTURE): whenever a note or answer needs to QUOTE the Bible, call get_verse with the reference (e.g. "Matt 7:21-23", "Romerne 10:9-13", "Sl 23") to fetch the exact verbatim text. NEVER quote scripture from memory or paraphrase it as if it were a quotation — quote only what get_verse returns, keep it in the returned (Danish) wording, and cite the reference. If get_verse returns an error or nothing, say the exact wording could not be verified rather than inventing a quote.`;
+export const BIBLE_ROUTING = `You have a get_verse tool for exact Bible text (authorized Danish 1992 translation). CRITICAL:
+- You do NOT reliably know the wording of Bible verses — your memory of scripture is frequently wrong, even when you feel certain. Therefore ANY time you are about to quote, cite, reproduce, or write out a Bible verse — whether in a saved note or a chat answer — you MUST FIRST call get_verse with the reference (e.g. "Matt 7:21-23", "Romerne 10:9-13", "Sl 23") and then use ONLY the text it returns, verbatim, in its returned Danish wording, together with the reference.
+- Writing a verse from memory is ALWAYS an error, no matter how sure you feel. Do not produce any quoted scripture that did not come from a get_verse result in this same turn.
+- If get_verse returns an error or no text, do NOT write the quote at all — state that the exact wording could not be verified and give only the reference.`;
 
 const BIBLE_TOOLS: LlmTool[] = [
   {
