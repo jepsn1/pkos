@@ -140,7 +140,7 @@ def main() -> None:
     )
     embedder = OllamaEmbedder(
         os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434"),
-        os.environ.get("EMBEDDING_MODEL", "nomic-embed-text"),
+        os.environ.get("EMBEDDING_MODEL", "bge-m3"),  # 1024-dim; MUST match schema/API
     )
     resolve_audio = lambda rel: os.path.join(uploads, rel)  # noqa: E731
     downloader = YtDlpDownloader(uploads, os.environ.get("YTDLP_COOKIES"))

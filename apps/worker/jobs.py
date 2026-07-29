@@ -116,7 +116,10 @@ def process_one(
         log.info("job %s: done (%d chunks)", job.id, len(chunks))
     except Exception as e:  # noqa: BLE001 — job errors must not kill the loop
         log.exception("job %s: failed", job.id)
-        store.fail(job.id, f"{type(e).__name__}: {e}")
+        try:
+            store.fail(job.id, f"{type(e).__name__}: {e}")
+        except Exception:  # noqa: BLE001 — even a failed fail() must not loop the job
+            log.exception("job %s: could not mark errored", job.id)
     return True
 
 
@@ -198,6 +201,12 @@ class PgJobStore:
         self.conn.commit()
 
     def fail(self, job_id: str, message: str) -> None:
+        # A failure in complete() (e.g. a bad INSERT) leaves the connection in an
+        # aborted transaction; without this rollback the fail UPDATE would also
+        # throw, the job could never leave 'processing', and it would be re-claimed
+        # as stale and re-processed forever (a transcription runaway). Roll back
+        # first so a job can ALWAYS be marked errored.
+        self.conn.rollback()
         with self.conn.cursor() as cur:
             cur.execute(
                 """

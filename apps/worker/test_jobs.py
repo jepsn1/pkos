@@ -137,6 +137,23 @@ def test_embedding_error_marks_job_error():
     assert "ollama down" in store.failed[0][1]
 
 
+def test_failure_during_fail_does_not_crash_loop():
+    # Regression: a bad complete() (e.g. embedding dim mismatch) aborts the txn so
+    # fail() also throws. process_one must still return True (loop survives) rather
+    # than propagating — otherwise the worker crashes, restarts, re-claims the stale
+    # job, and re-transcribes forever (a real transcription runaway we hit).
+    class BrokenStore(FakeStore):
+        def complete(self, *a):
+            raise RuntimeError("expected 1024 dimensions, not 768")
+
+        def fail(self, *a):
+            raise RuntimeError("current transaction is aborted")
+
+    store = BrokenStore([JOB])
+    transcriber = FakeTranscriber([Segment(0, 1, "hello")])
+    assert process_one(store, transcriber, FakeEmbedder(), str) is True
+
+
 URL_JOB = Job("job-2", "My Talk", None, source_url="https://youtu.be/x")
 
 
